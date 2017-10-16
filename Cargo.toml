@@ -1,0 +1,9 @@
+[package]
+name = "pH"
+version = "0.1.0"
+authors = ["Bruce Leidl <bruce@subgraph.com>"]
+
+[dependencies]
+byteorder="1.0.0"
+libc = "*"
+termios = "0.2.2"

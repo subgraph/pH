@@ -1,0 +1,28 @@
+From f209324e2d027b432870b64847122e55ba805ee9 Mon Sep 17 00:00:00 2001
+From: Dimitri John Ledkov <dimitri.j.ledkov@intel.com>
+Date: Thu, 11 Feb 2016 13:14:53 -0600
+Subject: [PATCH 22/22] Show restart information using info log
+
+---
+ kernel/reboot.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/reboot.c b/kernel/reboot.c
+index b367c1e0..cfd60137 100644
+--- a/kernel/reboot.c
++++ b/kernel/reboot.c
+@@ -217,9 +217,9 @@ void kernel_restart(char *cmd)
+ 	migrate_to_reboot_cpu();
+ 	syscore_shutdown();
+ 	if (!cmd)
+-		pr_emerg("Restarting system\n");
++		pr_info("Restarting system\n");
+ 	else
+-		pr_emerg("Restarting system with command '%s'\n", cmd);
++		pr_info("Restarting system with command '%s'\n", cmd);
+ 	kmsg_dump(KMSG_DUMP_RESTART);
+ 	machine_restart(cmd);
+ }
+-- 
+2.11.0
+
