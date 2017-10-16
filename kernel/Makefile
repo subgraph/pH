@@ -67,14 +67,14 @@ $(KERNEL_DL_PATH):
 	cd downloads; $(WGET) $(KERNEL_DOWNLOAD).tar.sign
 
 
-$(KERNEL_BUILD_PATH): $(KERNEL_UNPACK_PATH)
+$(KERNEL_BUILD_PATH): $(KERNEL_UNPACK_PATH) $(GRSEC_DL_PATH)
 	$(PATCH) -p1 -d $(KERNEL_UNPACK_PATH) < $(GRSEC_DL_PATH)
 	$(CP) config $(KERNEL_UNPACK_PATH)/.config
 	$(MV) build/unpack/$(KERNEL_VERSION) build/
 	$(MKDIR) $(KERNEL_UNPACK_PATH)
 	$(MKDIR) build/.patches
 	
-$(KERNEL_UNPACK_PATH): $(KERNEL_DL_PATH) $(SHA256_SENTINEL)
+$(KERNEL_UNPACK_PATH): $(KERNEL_DL_PATH) 
 	$(RM) -rf build/.unpack
 	$(MKDIR) -p build/.unpack
 	$(TAR) -C build/.unpack -xvf downloads/$(KERNEL_VERSION).tar
