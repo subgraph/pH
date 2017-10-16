@@ -59,7 +59,6 @@ static void move_mount(const char *source, const char *target) {
 
 static void setup_overlay(void) {
 	mount_tmpfs("/tmp");
-	mount("tmpfs", "/tmp", "tmpfs", 0, "mode=755");
 	do_mkdir("/tmp/ro");
 	do_mkdir("/tmp/rw");
 	mount_tmpfs("/tmp/rw");
