@@ -1,0 +1,7 @@
+[package]
+name = "ph-init"
+version = "0.1.0"
+authors = ["Bruce Leidl <bruce@subgraph.com>"]
+
+[dependencies]
+libc = "0.2"
