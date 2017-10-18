@@ -1,8 +1,8 @@
 extern crate libc;
 
-use std::env;
 use std::io;
 use std::process::{self, Child,Command,Stdio};
+use std::os::unix::process::CommandExt;
 
 mod sys;
 
@@ -71,7 +71,7 @@ fn setup_mounts() -> io::Result<()> {
 fn setup() -> io::Result<()> {
     setup_overlay()?;
     setup_mounts()?;
-    sethostname("Airwolf")?;
+    sethostname("airwolf")?;
     setsid()?;
     set_controlling_tty(0, true)?;
     Ok(())
@@ -85,6 +85,7 @@ fn run_shell() -> io::Result<Child>{
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
+        .before_exec(|| {println!("{}", SPLASH);Ok(())})
         .spawn()
 }
 
@@ -121,3 +122,14 @@ fn main() {
         let _ = wait_for_child();
     }
 }
+
+const SPLASH: &str = r#"
+             ------------------------------||-------------------------------
+                                          [##]
+                                        /~~~~~~\
+                                       |~~\  /~~|
+                                ==][===|___||___|===][==
+                                 [::]  (   ()   )  [::]
+                                        ~/~~~~\~
+                                       O'      `o
+"#;
