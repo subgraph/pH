@@ -3,6 +3,14 @@ name = "pH"
 version = "0.1.0"
 authors = ["Bruce Leidl <bruce@subgraph.com>"]
 
+[[bin]]
+name="pH"
+path="src/main.rs"
+
+[[bin]]
+name="ph-init"
+path="src/init/main.rs"
+
 [dependencies]
 byteorder="1.0.0"
 libc = "*"
