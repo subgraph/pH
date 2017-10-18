@@ -30,17 +30,17 @@ UNXZ	= unxz
 PWD	= $(shell pwd)
 
 PATCH_FILES := $(shell find patches/ -name "00*.patch" | sort)
-PATCHES = $(patsubst %.patch,build/.%.done,$(PATCH_FILES))
+PATCH_SENTINEL = build/.patches_applied
 
 
 GRSEC_DL_PATH = downloads/$(GRSEC_DIFF)
 KERNEL_DL_PATH = downloads/$(KERNEL_VERSION).tar
 KERNEL_BUILD_PATH = build/$(KERNEL_VERSION)
-KERNEL_UNPACK_PATH = build/unpack/$(KERNEL_VERSION)
+KERNEL_UNPACK_PATH = build/.unpack/$(KERNEL_VERSION)
 KERNEL_BUILD_OUTPUT = $(KERNEL_BUILD_PATH)/vmlinux
 
 PH_LINUX = ph_linux
-PH_LINUX_VER = $(PH_LINUX)-$(KERNEL_VERSION)
+PH_LINUX_VER = $(PH_LINUX)-$(LINUX_VERSION)
 
 GPGTMP = verify-tmp/
 GPGOPTS = --homedir $(GPGTMP) --trust-model direct --no-autostart
@@ -51,11 +51,14 @@ SHA256_FILE = v$(KERNEL_VERSION).sha256
 
 SHA256_SENTINEL = build/.sha256-verififed
 
+$(shell mkdir -p downloads)
+$(shell mkdir -p build)
+
 .NOTPARALLEL:
 
 .PHONY: all gen-sha256
 
-all: $(KERNEL_BUILD_OUTPUT)
+all: $(KERNEL_BUILD_OUTPUT) $(PH_LINUX_VER)
 	
 $(GRSEC_DL_PATH):
 	cd downloads; $(WGET) $(GRSEC_DOWNLOAD)
@@ -67,37 +70,33 @@ $(KERNEL_DL_PATH):
 	cd downloads; $(WGET) $(KERNEL_DOWNLOAD).tar.sign
 
 
-$(KERNEL_BUILD_PATH): $(KERNEL_UNPACK_PATH) $(GRSEC_DL_PATH)
-	$(PATCH) -p1 -d $(KERNEL_UNPACK_PATH) < $(GRSEC_DL_PATH)
-	$(CP) config $(KERNEL_UNPACK_PATH)/.config
-	$(MV) build/unpack/$(KERNEL_VERSION) build/
-	$(MKDIR) $(KERNEL_UNPACK_PATH)
-	$(MKDIR) build/.patches
-	
-$(KERNEL_UNPACK_PATH): $(KERNEL_DL_PATH) 
+$(KERNEL_BUILD_PATH): $(KERNEL_DL_PATH) $(GRSEC_DL_PATH) $(SHA256_SENTINEL)
 	$(RM) -rf build/.unpack
 	$(MKDIR) -p build/.unpack
 	$(TAR) -C build/.unpack -xvf downloads/$(KERNEL_VERSION).tar
-	$(MV) build/.unpack build/unpack
-
-
-$(PATCHES): build/.%.done : | $(KERNEL_BUILD_PATH)
-	$(PATCH) -p1 -d build/$(KERNEL_VERSION) < $*.patch
+	$(PATCH) -p1 -d $(KERNEL_UNPACK_PATH) < $(GRSEC_DL_PATH)
+	$(CP) config $(KERNEL_UNPACK_PATH)/.config
+	$(MV) $(KERNEL_UNPACK_PATH) build/
+	$(RM) -rf build/.unpack
+	
+$(PATCH_SENTINEL): | $(KERNEL_BUILD_PATH)
+	for p in $(PATCH_FILES); do $(PATCH) -p1 -d build/$(KERNEL_VERSION) < "$$p"; done
 	$(TOUCH) $@
 
+
 $(PH_LINUX_VER): $(KERNEL_BUILD_OUTPUT)
-	$(RM) $(PH_LINUX)
+	$(RM) -f $(PH_LINUX)
 	$(CP) $(KERNEL_BUILD_OUTPUT) $(PH_LINUX_VER)
-	$(LN) $(PWD)/$(PH_LINUX_VER) $(PH_LINUX)
+	$(LN) -s $(PWD)/$(PH_LINUX_VER) $(PH_LINUX)
 
 
-$(KERNEL_BUILD_OUTPUT): $(PATCHES)
-	$(MAKE) -C build/$(KERNEL_VERSION) -j 4
+$(KERNEL_BUILD_OUTPUT): $(PATCH_SENTINEL)
+	$(MAKE) -C build/$(KERNEL_VERSION)
 
 clean:
-	$(RM) -rf $(KERNEL_BUILD_PATH) build/unpack build/.unpack build/.patches $(SHA256_SENTINEL)
+	$(RM) -rf $(KERNEL_BUILD_PATH) $(SHA256_SENTINEL) $(PATCH_SENTINEL) $(PH_LINUX_VER)
 
-$(SHA256_SENTINEL):
+$(SHA256_SENTINEL): $(KERNEL_DL_PATH) $(GRSEC_DL_PATH)
 	$(SHA256) -c v$(LINUX_VERSION).sha256
 	$(TOUCH) $@
 
