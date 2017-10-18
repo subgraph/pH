@@ -37,27 +37,23 @@ fn main() {
 }
 
 fn find_init() -> Option<PathBuf> {
-    match find_kernel_base() {
-        Some(buf) => Some(buf.join("init/init")),
-        None => None,
-    }
-}
-fn find_kernel() -> Option<PathBuf> {
-    match find_kernel_base() {
-        Some(buf) => Some(buf.join("build/linux-4.9.56/vmlinux")),
-        None => None,
-    }
-}
-
-fn find_kernel_base() -> Option<PathBuf> {
     let mut cwd = env::current_dir().unwrap();
-    if try_kernel_base(&cwd) {
-        cwd.push("kernel");
-        return Some(cwd);
+    if cwd.join("rust/target/release/ph-init").exists() {
+        cwd.push("rust/target/release/ph-init");
+        return Some(cwd)
+    }
+    if cwd.join("rust/target/debug/ph-init").exists() {
+        cwd.push("rust/target/debug/ph-init");
+        return Some(cwd)
     }
     None
 }
 
-fn try_kernel_base(path: &Path) -> bool {
-    path.join("kernel/build/linux-4.9.56/vmlinux").exists()
+fn find_kernel() -> Option<PathBuf> {
+    let mut cwd = env::current_dir().unwrap();
+    if cwd.join("kernel/ph_linux").exists() {
+        cwd.push("kernel/ph_linux");
+        return Some(cwd)
+    }
+    None
 }
