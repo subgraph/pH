@@ -1,5 +1,5 @@
 use std::sync::{Arc,RwLock,RwLockWriteGuard};
-use memory::AddressRange;
+use crate::memory::AddressRange;
 
 pub trait IoPortOps: Send+Sync {
     fn io_in(&mut self, port: u16, size: usize) -> u32 {
@@ -55,11 +55,11 @@ impl IoPortOps for IoPortFakeI8042 {
 struct IoPortEntry {
     port: u16,
     count: usize,
-    device: Arc<RwLock<IoPortOps>>,
+    device: Arc<RwLock<dyn IoPortOps>>,
 }
 
 impl IoPortEntry {
-    fn new(port: u16, count: usize, device: Arc<RwLock<IoPortOps>>) -> IoPortEntry {
+    fn new(port: u16, count: usize, device: Arc<RwLock<dyn IoPortOps>>) -> IoPortEntry {
         IoPortEntry{ port: port, count: count, device: device }
     }
 
@@ -80,11 +80,11 @@ impl IoPortEntry {
 
 struct MmioEntry {
     range: AddressRange,
-    device: Arc<RwLock<MmioOps>>,
+    device: Arc<RwLock<dyn MmioOps>>,
 }
 
 impl MmioEntry {
-    fn new(range: AddressRange, device: Arc<RwLock<MmioOps>>) -> MmioEntry {
+    fn new(range: AddressRange, device: Arc<RwLock<dyn MmioOps>>) -> MmioEntry {
         MmioEntry{ range, device }
     }
 
@@ -117,11 +117,11 @@ impl IoDispatcher {
         self.state.write().unwrap()
     }
 
-    pub fn register_ioports(&self, port: u16, count: usize, dev: Arc<RwLock<IoPortOps>>) {
+    pub fn register_ioports(&self, port: u16, count: usize, dev: Arc<RwLock<dyn IoPortOps>>) {
         self.state_mut().register_ioports(port, count, dev)
     }
 
-    pub fn register_mmio(&self, range: AddressRange, device: Arc<RwLock<MmioOps>>) {
+    pub fn register_mmio(&self, range: AddressRange, device: Arc<RwLock<dyn MmioOps>>) {
         self.state_mut().register_mmio(range, device);
     }
 
@@ -159,11 +159,11 @@ impl IoDispatcherState {
         st
     }
 
-    fn register_ioports(&mut self, port: u16, count: usize, dev: Arc<RwLock<IoPortOps>>) {
+    fn register_ioports(&mut self, port: u16, count: usize, dev: Arc<RwLock<dyn IoPortOps>>) {
         self.ioport_entries.push(IoPortEntry::new(port, count, dev));
     }
 
-    fn register_mmio(&mut self, range: AddressRange, device: Arc<RwLock<MmioOps>>) {
+    fn register_mmio(&mut self, range: AddressRange, device: Arc<RwLock<dyn MmioOps>>) {
         self.mmio_entries.push(MmioEntry::new(range, device));
     }
 

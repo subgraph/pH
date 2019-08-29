@@ -1,7 +1,7 @@
 
 use std::io::{self,Read,Write};
 
-use memory::GuestRam;
+use crate::memory::GuestRam;
 use super::VirtQueue;
 use super::vring::Descriptor;
 

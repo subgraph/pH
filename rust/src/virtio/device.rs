@@ -1,13 +1,13 @@
 use std::sync::{Arc,RwLock};
 use std::ops::DerefMut;
 
-use memory::{GuestRam,AddressRange};
+use crate::memory::{GuestRam,AddressRange};
 use super::bus::VirtioDeviceConfig;
 use super::VirtQueue;
 use super::config::VirtQueueConfig;
 use super::consts::*;
-use vm::io::MmioOps;
-use vm::Result;
+use crate::vm::io::MmioOps;
+use crate::vm::Result;
 
 pub trait VirtioDeviceOps: Send+Sync {
     fn reset(&mut self) {}
@@ -24,7 +24,7 @@ pub struct VirtioDevice {
     isr_mmio: AddressRange,
     notify_mmio: AddressRange,
     device_cfg_mmio: Option<AddressRange>,
-    device_ops: Arc<RwLock<VirtioDeviceOps>>,
+    device_ops: Arc<RwLock<dyn VirtioDeviceOps>>,
     dfselect: u32,
     gfselect: u32,
     device_features: u64,
@@ -182,7 +182,7 @@ impl VirtioDevice {
     }
 
     fn with_ops<U,F>(&self, f: F) -> U
-      where F: FnOnce(&mut VirtioDeviceOps) -> U {
+      where F: FnOnce(&mut dyn VirtioDeviceOps) -> U {
         let mut ops = self.device_ops.write().unwrap();
         f(ops.deref_mut())
     }

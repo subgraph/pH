@@ -3,9 +3,9 @@ use std::thread;
 
 use std::path::{Path,PathBuf};
 
-use memory::GuestRam;
-use virtio::{self,VirtioBus,VirtioDeviceOps, VirtQueue};
-use vm::Result;
+use crate::memory::GuestRam;
+use crate::virtio::{self,VirtioBus,VirtioDeviceOps, VirtQueue};
+use crate::vm::Result;
 
 mod fid;
 mod pdu;

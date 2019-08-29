@@ -3,9 +3,9 @@ use std::sync::{Arc,RwLock};
 use std::thread;
 use std::fs::File;
 
-use virtio::{VirtioDeviceOps,VirtioBus,VirtQueue};
-use memory::GuestRam;
-use vm::Result;
+use crate::virtio::{VirtioDeviceOps,VirtioBus,VirtQueue};
+use crate::memory::GuestRam;
+use crate::vm::Result;
 
 
 const VIRTIO_ID_RANDOM: u16 = 4;

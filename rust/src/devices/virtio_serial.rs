@@ -3,9 +3,9 @@ use std::io::{self,Write,Read};
 use std::thread::spawn;
 use termios::*;
 
-use virtio::{VirtioDeviceOps,VirtioBus, VirtQueue};
-use memory::GuestRam;
-use vm::Result;
+use crate::virtio::{VirtioDeviceOps,VirtioBus, VirtQueue};
+use crate::memory::GuestRam;
+use crate::vm::Result;
 
 const VIRTIO_ID_CONSOLE: u16 = 3;
 
@@ -57,7 +57,7 @@ impl VirtioSerial {
     }
 }
 
-use system::ioctl;
+use crate::system::ioctl;
 
 #[repr(C)]
 #[derive(Default)]

@@ -1,7 +1,7 @@
-use memory::GuestRam;
+use crate::memory::GuestRam;
 use std::sync::Arc;
 
-use vm::Result;
+use crate::vm::Result;
 
 use super::VirtQueue;
 use super::eventfd::IoEventFd;

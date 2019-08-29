@@ -3,8 +3,8 @@ use std::os::unix::io::RawFd;
 
 use libc;
 
-use vm::{Result,Error,ErrorKind};
-use kvm::Kvm;
+use crate::vm::{Result,Error,ErrorKind};
+use crate::kvm::Kvm;
 
 pub struct EventFd(RawFd);
 
@@ -43,7 +43,7 @@ impl EventFd {
             }
             return Err(Error::new(ErrorKind::EventFdError, "read failed"));
         }
-        Ok((v))
+        Ok(v)
     }
 }
 

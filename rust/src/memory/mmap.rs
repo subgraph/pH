@@ -5,7 +5,7 @@ use std::mem;
 use std::io::Write;
 use std::os::unix::io::RawFd;
 
-use vm::{Result,Error,ErrorKind};
+use crate::vm::{Result,Error,ErrorKind};
 
 pub struct Mapping {
     ptr: *mut u8,

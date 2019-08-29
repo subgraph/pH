@@ -2,7 +2,7 @@ use std::sync::{Arc,RwLock};
 use std::mem;
 use libc;
 
-use vm::io::{IoDispatcher,IoPortOps};
+use crate::vm::io::{IoDispatcher,IoPortOps};
 
 const RTC_SECONDS: u8 = 0x00;
 const RTC_MINUTES: u8 = 0x02;

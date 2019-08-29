@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 mod ioctl;
 
-use vm::{Result,Error,ErrorKind};
+use crate::vm::{Result,Error,ErrorKind};
 pub use self::ioctl::{KvmCpuIdEntry,KvmLapicState, KvmSRegs, KvmRegs, KvmFpu, KvmMsrs, KvmSegment};
 
 pub const KVM_CAP_IRQCHIP: u32 = 0;

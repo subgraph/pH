@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use kvm::KvmVcpu;
-use memory::Mapping;
+use crate::kvm::KvmVcpu;
+use crate::memory::Mapping;
 use super::Result;
 use super::io::IoDispatcher;
 

@@ -1,8 +1,8 @@
 use std::sync::{Arc, RwLock};
 use std::io::{self, Write};
 
-use vm::io::{IoPortOps,IoDispatcher};
-use kvm::Kvm;
+use crate::vm::io::{IoPortOps,IoDispatcher};
+use crate::kvm::Kvm;
 
 const UART_TX: u16 = 0;
 const UART_RX: u16 = 0;

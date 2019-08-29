@@ -1,9 +1,9 @@
 use std::sync::atomic::{Ordering, AtomicUsize, AtomicBool};
 use std::sync::Arc;
 
-use memory::GuestRam;
-use kvm::Kvm;
-use vm::Result;
+use crate::memory::GuestRam;
+use crate::kvm::Kvm;
+use crate::vm::Result;
 
 use super::eventfd::{EventFd,IoEventFd};
 use super::consts::*;

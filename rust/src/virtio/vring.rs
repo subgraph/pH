@@ -4,10 +4,10 @@ use std::fmt;
 use std::cmp;
 use std::io::{self, Read};
 
-use memory::GuestRam;
+use crate::memory::GuestRam;
 use super::consts::*;
 
-use vm::{Result,Error,ErrorKind};
+use crate::vm::{Result,Error,ErrorKind};
 
 ///
 /// A convenience wrapper around `AtomicUsize`

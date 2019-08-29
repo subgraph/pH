@@ -1,6 +1,6 @@
 use libc::{self, c_ulong, c_void};
 use std::os::unix::io::RawFd;
-use vm::{Error,Result};
+use crate::vm::{Error,Result};
 
 pub const IOC_SIZEBITS:  u64 = 14;
 pub const IOC_DIRBITS:   u64 = 2;

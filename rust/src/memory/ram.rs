@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::cmp;
 use std::mem;
 
-use memory::Mapping;
-use memory::mmap::Serializable;
-use memory::AddressRange;
+use crate::memory::Mapping;
+use crate::memory::mmap::Serializable;
+use crate::memory::AddressRange;
 
-use kvm::Kvm;
-use vm::{Result,Error,ErrorKind};
+use crate::kvm::Kvm;
+use crate::vm::{Result,Error,ErrorKind};
 
 pub const HIMEM_BASE: u64 = (1 << 32);
 pub const PCI_MMIO_RESERVED_SIZE: usize = (512 << 20);

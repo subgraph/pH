@@ -1,11 +1,11 @@
 use std::sync::{Arc,RwLock};
-use vm::io::IoDispatcher;
-use kvm::Kvm;
-use memory::{GuestRam,AddressRange};
+use crate::vm::io::IoDispatcher;
+use crate::kvm::Kvm;
+use crate::memory::{GuestRam,AddressRange};
 use super::{VirtioDevice,VirtioDeviceOps,PciIrq};
 use super::consts::*;
 use super::pci::PciBus;
-use vm::Result;
+use crate::vm::Result;
 
 
 pub struct VirtioBus {
@@ -27,7 +27,7 @@ impl VirtioBus {
         }
     }
 
-    pub fn new_virtio_device(&mut self, device_type: u16, ops: Arc<RwLock<VirtioDeviceOps>>) -> VirtioDeviceConfig {
+    pub fn new_virtio_device(&mut self, device_type: u16, ops: Arc<RwLock<dyn VirtioDeviceOps>>) -> VirtioDeviceConfig {
         VirtioDeviceConfig::new(self, device_type, ops)
     }
 
@@ -41,7 +41,7 @@ pub struct VirtioDeviceConfig<'a> {
     device_type: u16,
     irq: u8,
     kvm: Kvm,
-    ops: Arc<RwLock<VirtioDeviceOps>>,
+    ops: Arc<RwLock<dyn VirtioDeviceOps>>,
     mmio: AddressRange,
     num_queues: usize,
     config_size: usize,
@@ -51,7 +51,7 @@ pub struct VirtioDeviceConfig<'a> {
 }
 
 impl <'a> VirtioDeviceConfig<'a> {
-    fn new(virtio_bus: &mut VirtioBus, device_type: u16, ops: Arc<RwLock<VirtioDeviceOps>>) -> VirtioDeviceConfig {
+    fn new(virtio_bus: &mut VirtioBus, device_type: u16, ops: Arc<RwLock<dyn VirtioDeviceOps>>) -> VirtioDeviceConfig {
         let kvm = virtio_bus.kvm.clone();
         let mmio = virtio_bus.pci_bus.write().unwrap().allocate_mmio_space(VIRTIO_MMIO_AREA_SIZE);
         VirtioDeviceConfig {
@@ -70,7 +70,7 @@ impl <'a> VirtioDeviceConfig<'a> {
 
     pub fn kvm(&self) -> &Kvm { &self.kvm }
 
-    pub fn ops(&self) -> Arc<RwLock<VirtioDeviceOps>> {
+    pub fn ops(&self) -> Arc<RwLock<dyn VirtioDeviceOps>> {
         self.ops.clone()
     }
     pub fn irq(&self) -> u8 { self.irq }

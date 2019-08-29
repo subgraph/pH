@@ -6,7 +6,7 @@ use std::fs;
 
 use libc;
 
-use memory::GuestRam;
+use crate::memory::GuestRam;
 use super::pdu::{PduParser,P9Attr};
 use super::fid::FidCache;
 use super::filesystem::{FileSystem,FsTouch,FileSystemOps};

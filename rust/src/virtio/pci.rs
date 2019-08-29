@@ -1,9 +1,9 @@
 use std::sync::{Arc,RwLock};
 use byteorder::{ByteOrder,LittleEndian};
 
-use vm::io::{IoDispatcher,IoPortOps};
-use memory::PCI_MMIO_RESERVED_BASE;
-use memory::AddressRange;
+use crate::vm::io::{IoDispatcher,IoPortOps};
+use crate::memory::PCI_MMIO_RESERVED_BASE;
+use crate::memory::AddressRange;
 use super::consts::*;
 
 struct PciConfigAddress(u32);

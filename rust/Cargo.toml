@@ -2,6 +2,7 @@
 name = "pH"
 version = "0.1.0"
 authors = ["Bruce Leidl <bruce@subgraph.com>"]
+edition = "2018"
 
 [[bin]]
 name="pH"

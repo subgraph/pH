@@ -1,7 +1,7 @@
-use vm::Result;
+use crate::vm::Result;
 
-use kvm::{KvmVcpu,KvmRegs,KvmFpu, KvmMsrs, KvmSegment};
-use memory::{GuestRam,KERNEL_ZERO_PAGE};
+use crate::kvm::{KvmVcpu,KvmRegs,KvmFpu, KvmMsrs, KvmSegment};
+use crate::memory::{GuestRam,KERNEL_ZERO_PAGE};
 
 
 const MSR_IA32_SYSENTER_CS: u32  = 0x00000174;

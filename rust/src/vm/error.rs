@@ -68,7 +68,7 @@ enum Repr {
 #[derive(Debug)]
 struct General {
     kind: ErrorKind,
-    error: Box<error::Error+Send+Sync>,
+    error: Box<dyn error::Error+Send+Sync>,
 }
 
 #[derive(Debug)]
@@ -78,11 +78,11 @@ pub struct Error {
 
 impl Error {
     pub fn new<E>(kind: ErrorKind, error: E) -> Error
-        where E: Into<Box<error::Error+Send+Sync>> {
+        where E: Into<Box<dyn error::Error+Send+Sync>> {
         Self::_new(kind, error.into())
     }
 
-    fn _new(kind: ErrorKind, error: Box<error::Error+Send+Sync>) -> Error {
+    fn _new(kind: ErrorKind, error: Box<dyn error::Error+Send+Sync>) -> Error {
         Error {
             repr: Repr::General(Box::new(General{
                 kind, error
@@ -159,7 +159,7 @@ impl error::Error for Error {
         }
     }
 
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&dyn error::Error> {
         match self.repr {
             Repr::Errno(..) => None,
             Repr::Simple(..) => None,

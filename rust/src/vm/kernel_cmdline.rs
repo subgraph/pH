@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 
-use memory::{GuestRam,KERNEL_CMDLINE_ADDRESS};
+use crate::memory::{GuestRam,KERNEL_CMDLINE_ADDRESS};
 use super::Result;
 
 

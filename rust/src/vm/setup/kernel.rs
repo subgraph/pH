@@ -4,8 +4,8 @@ use std::fs::{File};
 use std::io::{self, Read,SeekFrom,Seek};
 use byteorder::{LittleEndian,ReadBytesExt};
 
-use memory::{self,GuestRam,KERNEL_ZERO_PAGE};
-use vm::{Result,Error,ErrorKind};
+use crate::memory::{self,GuestRam,KERNEL_ZERO_PAGE};
+use crate::vm::{Result,Error,ErrorKind};
 
 
 // Documentation/x86/boot.txt

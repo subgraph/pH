@@ -2,9 +2,9 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use std::io::Write;
 use std::iter;
 
-use memory::GuestRam;
-use virtio::PciIrq;
-use vm::Result;
+use crate::memory::GuestRam;
+use crate::virtio::PciIrq;
+use crate::vm::Result;
 
 const APIC_DEFAULT_PHYS_BASE: u32 = 0xfee00000;
 const IO_APIC_DEFAULT_PHYS_BASE: u32 = 0xfec00000;

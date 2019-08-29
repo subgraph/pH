@@ -5,8 +5,8 @@ use std::io::{self,Read,Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::ffi::OsStr;
-use memory::GuestRam;
-use virtio::Chain;
+use crate::memory::GuestRam;
+use crate::virtio::Chain;
 
 use super::filesystem::StatFs;
 

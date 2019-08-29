@@ -5,11 +5,11 @@ use std::env;
 
 use self::io::IoDispatcher;
 
-use virtio::VirtioBus;
-use devices;
+use crate::virtio::VirtioBus;
+use crate::devices;
 
-use memory::{GuestRam,KVM_KERNEL_LOAD_ADDRESS};
-use kvm::*;
+use crate::memory::{GuestRam,KVM_KERNEL_LOAD_ADDRESS};
+use crate::kvm::*;
 
 
 mod run;

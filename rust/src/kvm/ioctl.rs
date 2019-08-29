@@ -3,9 +3,9 @@ use std::os::unix::io::RawFd;
 use std::ffi::CString;
 use std::fmt;
 
-use system::ioctl::{ioctl_with_val,ioctl_with_ref,ioctl_with_mut_ref};
+use crate::system::ioctl::{ioctl_with_val,ioctl_with_ref,ioctl_with_mut_ref};
 
-use vm::{Result,Error,ErrorKind};
+use crate::vm::{Result,Error,ErrorKind};
 
 
 const KVMIO:     u64 = 0xAE;
