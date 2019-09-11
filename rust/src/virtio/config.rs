@@ -8,7 +8,6 @@ use super::eventfd::IoEventFd;
 use super::vring::Vring;
 use super::virtqueue::InterruptLine;
 use super::bus::VirtioDeviceConfig;
-use super::consts::DEFAULT_QUEUE_SIZE;
 
 ///
 /// Manages a set of virtqueues during device intitialization.
@@ -28,7 +27,7 @@ impl VirtQueueConfig {
             num_queues: dev_config.num_queues(),
             selected_queue: 0,
             enabled_features: 0,
-            vrings: create_vrings(memory,dev_config.num_queues()),
+            vrings: create_vrings(memory,dev_config.queue_sizes()),
             interrupt: InterruptLine::from_config(&dev_config)?,
             events: create_ioeventfds(&dev_config)?,
         })
@@ -123,10 +122,10 @@ fn create_ioeventfds(conf: &VirtioDeviceConfig) -> Result<Vec<Arc<IoEventFd>>> {
     Ok(v)
 }
 
-fn create_vrings(memory: &GuestRam, n: usize) -> Vec<Vring> {
-    let mut v = Vec::with_capacity(n);
-    for _ in 0..n {
-        v.push(Vring::new(memory.clone(), DEFAULT_QUEUE_SIZE));
+fn create_vrings(memory: &GuestRam, queue_sizes: &[usize]) -> Vec<Vring> {
+    let mut v = Vec::with_capacity(queue_sizes.len());
+    for &sz in queue_sizes {
+        v.push(Vring::new(memory.clone(), sz as u16))
     }
     v
 }

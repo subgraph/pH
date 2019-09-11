@@ -6,6 +6,7 @@ use super::{VirtioDevice,VirtioDeviceOps,PciIrq};
 use super::consts::*;
 use super::pci::PciBus;
 use crate::vm::Result;
+use std::iter;
 
 
 pub struct VirtioBus {
@@ -43,7 +44,7 @@ pub struct VirtioDeviceConfig<'a> {
     kvm: Kvm,
     ops: Arc<RwLock<dyn VirtioDeviceOps>>,
     mmio: AddressRange,
-    num_queues: usize,
+    queue_sizes: Vec<usize>,
     config_size: usize,
     device_class: u16,
     features: u64,
@@ -61,7 +62,7 @@ impl <'a> VirtioDeviceConfig<'a> {
             kvm,
             ops,
             mmio,
-            num_queues: 0,
+            queue_sizes: Vec::new(),
             config_size: 0,
             features: 0,
             device_class: 0x0880,
@@ -100,7 +101,11 @@ impl <'a> VirtioDeviceConfig<'a> {
     }
 
     pub fn num_queues(&self) -> usize {
-        self.num_queues
+        self.queue_sizes.len()
+    }
+
+    pub fn queue_sizes(&self) -> &[usize] {
+        &self.queue_sizes
     }
 
     #[allow(dead_code)]
@@ -108,8 +113,15 @@ impl <'a> VirtioDeviceConfig<'a> {
         self.config_size
     }
 
+    pub fn set_queue_sizes(&mut self, sizes: &[usize]) -> &'a mut VirtioDeviceConfig {
+        self.queue_sizes.clear();
+        self.queue_sizes.extend_from_slice(sizes);
+        self
+    }
+
     pub fn set_num_queues(&mut self, n: usize) -> &'a mut VirtioDeviceConfig {
-        self.num_queues = n;
+        self.queue_sizes.clear();
+        self.queue_sizes.extend(iter::repeat(DEFAULT_QUEUE_SIZE as usize).take(n));
         self
     }
 
