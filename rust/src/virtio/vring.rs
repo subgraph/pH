@@ -345,7 +345,7 @@ impl Descriptor {
         self.has_flag(VRING_DESC_F_INDIRECT)
     }
 
-    fn remaining(&self, offset: usize) -> usize {
+    pub fn remaining(&self, offset: usize) -> usize {
         if offset >= self.len as usize {
             0
         } else {

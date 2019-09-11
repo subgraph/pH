@@ -4,6 +4,7 @@ use std::io::{self,Read,Write};
 use crate::memory::GuestRam;
 use super::VirtQueue;
 use super::vring::Descriptor;
+use byteorder::{WriteBytesExt, LittleEndian, ReadBytesExt};
 
 pub struct Chain {
 
@@ -127,7 +128,7 @@ impl Chain {
     /// load next descriptor if `current` descriptor
     /// has been fully consumed.
     ///
-    fn inc_offset(&mut self, sz: usize) {
+    pub fn inc_offset(&mut self, sz: usize) {
         self.offset += sz;
         if self.offset >= self.current_size() {
             self.load_next_descriptor();
@@ -225,13 +226,54 @@ impl Chain {
         res
     }
 
-    /*
-    pub fn copy_to_writer<W: Write+Sized>(&mut self, w: W, size: usize) -> io::Result<usize> {
-        unimplemented!()
-
+    pub fn current_write_slice(&self) -> &mut [u8] {
+        match self.current {
+            Some(d) if d.is_write() && d.remaining(self.offset) > 0 => {
+                let size = d.remaining(self.offset);
+                self.memory.mut_slice(d.addr + self.offset as u64, size).unwrap_or(&mut [])
+            },
+            _ => &mut [],
+        }
     }
-    */
+    pub fn current_read_slice(&self) -> &[u8] {
+        match self.current {
+            Some(d) if !d.is_write() && d.remaining(self.offset) > 0 => {
+                let size = d.remaining(self.offset);
+                self.memory.slice(d.addr + self.offset as u64, size).unwrap_or(&[])
+            },
+            _ => &[],
+        }
+    }
 
+    pub fn w8(&mut self, n: u8) -> io::Result<()> {
+        self.write_u8(n)
+    }
+
+    #[allow(unused)]
+    pub fn w16(&mut self, n: u16) -> io::Result<()> {
+        self.write_u16::<LittleEndian>(n)
+    }
+
+    pub fn w32(&mut self, n: u32) -> io::Result<()> {
+        self.write_u32::<LittleEndian>(n)
+    }
+
+    pub fn w64(&mut self, n: u64) -> io::Result<()> {
+        self.write_u64::<LittleEndian>(n)
+    }
+
+    #[allow(unused)]
+    pub fn r16(&mut self) -> io::Result<u16> {
+        self.read_u16::<LittleEndian>()
+    }
+
+    pub fn r32(&mut self) -> io::Result<u32> {
+        self.read_u32::<LittleEndian>()
+    }
+
+    pub fn r64(&mut self) -> io::Result<u64> {
+        self.read_u64::<LittleEndian>()
+    }
 }
 
 impl Drop for Chain {
