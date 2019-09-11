@@ -7,12 +7,15 @@ mod eventfd;
 mod pci;
 mod virtqueue;
 mod vring;
+mod device_config;
 
 pub use self::virtqueue::VirtQueue;
 pub use self::pci::PciIrq;
 pub use self::bus::VirtioBus;
 pub use self::device::{VirtioDevice,VirtioDeviceOps};
 pub use self::chain::Chain;
+pub use self::eventfd::EventFd;
+pub use self::device_config::DeviceConfigArea;
 
 use byteorder::{ByteOrder,LittleEndian};
 

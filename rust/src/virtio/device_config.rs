@@ -8,6 +8,7 @@ pub struct DeviceConfigArea {
 }
 
 
+#[allow(dead_code)]
 impl DeviceConfigArea {
     pub fn new(size: usize) -> Self {
         DeviceConfigArea{
