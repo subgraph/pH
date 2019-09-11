@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{RawFd,AsRawFd};
 
 use libc;
 
@@ -17,10 +17,6 @@ impl EventFd {
             return Err(Error::from_last_errno());
         }
         Ok(EventFd(fd))
-    }
-
-    pub fn raw_fd(&self) -> RawFd {
-        self.0
     }
 
     pub fn write(&self, v: u64) -> Result<()> {
@@ -53,6 +49,12 @@ impl Drop for EventFd {
     }
 }
 
+impl AsRawFd for EventFd  {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0
+    }
+}
+
 pub struct IoEventFd {
     kvm: Kvm,
     addr: u64,
@@ -62,7 +64,7 @@ pub struct IoEventFd {
 impl IoEventFd {
     pub fn new(kvm: &Kvm, address: u64) -> Result<IoEventFd> {
         let evt = Arc::new(EventFd::new()?);
-        kvm.ioeventfd_add(address, evt.raw_fd())?;
+        kvm.ioeventfd_add(address, evt.as_raw_fd())?;
         Ok(IoEventFd {
             kvm: kvm.clone(),
             addr: address,
@@ -76,12 +78,16 @@ impl IoEventFd {
     pub fn write(&self, v: u64) -> Result<()> {
         self.evt.write(v)
     }
-
 }
 
 impl Drop for IoEventFd {
     fn drop(&mut self) {
-        let _ = self.kvm.ioeventfd_del(self.addr, self.evt.raw_fd());
+        let _ = self.kvm.ioeventfd_del(self.addr, self.evt.as_raw_fd());
     }
 }
 
+impl AsRawFd for IoEventFd {
+    fn as_raw_fd(&self) -> RawFd {
+        self.evt.as_raw_fd()
+    }
+}
