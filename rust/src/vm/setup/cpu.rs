@@ -115,6 +115,7 @@ const X86_CR0_PG: u64 = 0x80000000;
 const X86_CR4_PAE: u64 = 0x20;
 
 const EFER_LME: u64 = 0x100;
+const EFER_LMA: u64 = (1 << 10);
 
 fn setup_boot_pagetables(memory: &GuestRam) -> Result<()> {
     memory.write_int::<u64>(BOOT_PML4, BOOT_PDPTE | 0x3)?;
@@ -172,6 +173,7 @@ pub fn setup_pm_sregs(vcpu: &KvmVcpu, memory: &GuestRam) -> Result<()> {
     regs.cr3 = BOOT_PML4;
     regs.cr4 |= X86_CR4_PAE;
     regs.cr0 |= X86_CR0_PG;
+    regs.efer |= EFER_LMA;
 
     vcpu.set_sregs(&regs)?;
     Ok(())
