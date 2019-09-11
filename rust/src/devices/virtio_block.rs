@@ -123,27 +123,6 @@ impl <D: DiskImage> VirtioDeviceOps for VirtioBlock<D> {
             }
         });
 
-        /*
-        thread::spawn({
-            let path = self.disk_path.to_path_buf();
-            let read_only = self.read_only;
-            let sector_offset = self.sector_offset;
-            move || {
-                let vq = queues.pop().unwrap();
-                let disk = match DDiskImage::new_memory_overlay(&path, sector_offset) {
-                    Ok(disk) => disk,
-                    Err(e) => {
-                        warn!("Error opening disk image {}: {}", path.display(), e);
-                        return
-                    },
-                };
-                let mut dev = VirtioBlockDevice::new(vq, disk);
-                if let Err(e) = dev.run() {
-                    warn!("Error running virtio block device: {}", e);
-                }
-            }
-        });
-        */
     }
 }
 
