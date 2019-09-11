@@ -4,6 +4,7 @@ use std::fmt;
 use std::str;
 use std::ffi::CStr;
 use libc;
+use crate::disk;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -21,6 +22,7 @@ pub enum ErrorKind {
     CreateVmFailed,
     BadVersion,
     EventFdError,
+    DiskImageOpen(disk::Error)
 }
 
 impl ErrorKind {
@@ -38,6 +40,7 @@ impl ErrorKind {
             ErrorKind::CreateVmFailed => "call to create vm failed",
             ErrorKind::BadVersion => "unexpected kvm api version",
             ErrorKind::EventFdError => "eventfd error",
+            ErrorKind::DiskImageOpen(_) => "failed to open disk image",
         }
     }
 }
@@ -48,6 +51,7 @@ impl fmt::Display for ErrorKind {
             ErrorKind::InvalidAddress(addr) => write!(f, "{}: 0x{:x}", self.as_str(), addr),
             ErrorKind::InvalidMappingOffset(offset) => write!(f, "{}: 0x{:x}", self.as_str(), offset),
             ErrorKind::IoctlFailed(name) => write!(f, "Ioctl {} failed", name),
+            ErrorKind::DiskImageOpen(ref e) => write!(f, "failed to open disk image: {}", e),
             _ => write!(f, "{}", self.as_str()),
         }
     }
@@ -159,11 +163,11 @@ impl error::Error for Error {
         }
     }
 
-    fn cause(&self) -> Option<&dyn error::Error> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self.repr {
             Repr::Errno(..) => None,
             Repr::Simple(..) => None,
-            Repr::General(ref c) => c.error.cause(),
+            Repr::General(ref c) => c.error.source(),
         }
     }
 }
