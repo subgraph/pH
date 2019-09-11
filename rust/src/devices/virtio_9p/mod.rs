@@ -3,7 +3,7 @@ use std::thread;
 
 use std::path::{Path,PathBuf};
 
-use crate::memory::GuestRam;
+use crate::memory::{GuestRam, MemoryManager};
 use crate::virtio::{self,VirtioBus,VirtioDeviceOps, VirtQueue};
 use crate::vm::Result;
 
@@ -71,11 +71,12 @@ impl VirtioDeviceOps for VirtioP9 {
     }
 
 
-    fn start(&mut self, memory: GuestRam, mut queues: Vec<VirtQueue>) {
+    fn start(&mut self, memory: &MemoryManager, mut queues: Vec<VirtQueue>) {
         let vq = queues.pop().unwrap();
         let root_dir = self.root_dir.clone();
         let init_path = self.init_path.clone();
-        thread::spawn(|| run_device(memory, vq, root_dir, init_path));
+        let ram = memory.guest_ram().clone();
+        thread::spawn(|| run_device(ram, vq, root_dir, init_path));
     }
 }
 
