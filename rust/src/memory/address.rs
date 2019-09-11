@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Copy,Clone,Debug)]
+#[derive(Copy,Clone,Debug,Ord,PartialOrd,Eq,PartialEq)]
 pub struct AddressRange {
     start: u64, // inclusive
     end: u64,   // exclusive
@@ -65,6 +65,8 @@ impl AddressRange {
     }
 
     pub fn base(&self) -> u64 { self.start }
+
+    pub fn end(&self) -> u64 { self.end }
 
     pub fn size(&self) -> usize { (self.end - self.start) as usize }
 
