@@ -56,8 +56,14 @@ impl Kvm {
         })
     }
 
-    pub fn add_memory_region(&self, slot: usize, guest_address: u64, host_address: u64, size: usize) -> Result<()> {
-        let region = ioctl::KvmUserspaceMemoryRegion::new(slot as u32, guest_address, host_address, size as u64);
+    pub fn add_memory_region(&self, slot: u32, guest_address: u64, host_address: u64, size: usize) -> Result<()> {
+        let region = ioctl::KvmUserspaceMemoryRegion::new(slot, guest_address, host_address, size as u64);
+        ioctl::kvm_set_user_memory_region(&self.vmfd, &region)?;
+        Ok(())
+    }
+
+    pub fn remove_memory_region(&self, slot: u32) -> Result<()> {
+        let region = ioctl::KvmUserspaceMemoryRegion::new(slot, 0, 0, 0);
         ioctl::kvm_set_user_memory_region(&self.vmfd, &region)?;
         Ok(())
     }
