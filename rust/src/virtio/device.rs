@@ -1,7 +1,7 @@
 use std::sync::{Arc,RwLock};
 use std::ops::DerefMut;
 
-use crate::memory::{GuestRam,AddressRange};
+use crate::memory::{AddressRange, MemoryManager};
 use super::bus::VirtioDeviceConfig;
 use super::VirtQueue;
 use super::config::VirtQueueConfig;
@@ -14,11 +14,11 @@ pub trait VirtioDeviceOps: Send+Sync {
     fn enable_features(&mut self, bits: u64) -> bool { let _ = bits; true }
     fn write_config(&mut self, offset: usize, size: usize, val: u64) { let (_,_,_) = (offset, size, val); }
     fn read_config(&mut self, offset: usize, size: usize) -> u64 { let (_,_) = (offset, size); 0 }
-    fn start(&mut self, memory: GuestRam, queues: Vec<VirtQueue>);
+    fn start(&mut self, memory: &MemoryManager, queues: Vec<VirtQueue>);
 }
 
 pub struct VirtioDevice {
-    memory: GuestRam,
+    memory: MemoryManager,
     vq_config: VirtQueueConfig,
     common_cfg_mmio: AddressRange,
     isr_mmio: AddressRange,
@@ -43,10 +43,10 @@ fn get_hi32(val: u64) -> u32 { (val >> 32) as u32 }
 
 
 impl VirtioDevice {
-    pub fn new(memory: GuestRam, config: &VirtioDeviceConfig) -> Result<Arc<RwLock<VirtioDevice>>> {
+    pub fn new(memory: MemoryManager, config: &VirtioDeviceConfig) -> Result<Arc<RwLock<VirtioDevice>>> {
         Ok(Arc::new(RwLock::new(VirtioDevice {
             memory: memory.clone(),
-            vq_config: VirtQueueConfig::new(&memory.clone(),&config)?,
+            vq_config: VirtQueueConfig::new(memory.guest_ram(),&config)?,
             common_cfg_mmio: config.common_cfg_mmio(),
             isr_mmio: config.isr_mmio(),
             notify_mmio: config.notify_mmio(),
@@ -85,8 +85,8 @@ impl VirtioDevice {
         let new_bits = val & !self.status;
 
         if new_bits & VIRTIO_CONFIG_S_DRIVER_OK != 0 {
-            match self.vq_config.create_queues(&self.memory) {
-                Ok(queues) => self.with_ops(|ops| ops.start(self.memory.clone(), queues)),
+            match self.vq_config.create_queues(self.memory.guest_ram()) {
+                Ok(queues) => self.with_ops(|ops| ops.start(&self.memory, queues)),
                 Err(e) => {
                     println!("creating virtqueues failed {}", e);
                     self.status |= VIRTIO_CONFIG_S_NEEDS_RESET;

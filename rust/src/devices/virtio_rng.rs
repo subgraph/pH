@@ -4,7 +4,7 @@ use std::thread;
 use std::fs::File;
 
 use crate::virtio::{VirtioDeviceOps,VirtioBus,VirtQueue};
-use crate::memory::GuestRam;
+use crate::memory::MemoryManager;
 use crate::vm::Result;
 
 
@@ -25,7 +25,7 @@ impl VirtioRandom {
 
 impl VirtioDeviceOps for VirtioRandom {
 
-    fn start(&mut self, _memory: GuestRam, mut queues: Vec<VirtQueue>) {
+    fn start(&mut self, _memory: &MemoryManager, mut queues: Vec<VirtQueue>) {
         thread::spawn(move|| {
             run(queues.pop().unwrap())
         });

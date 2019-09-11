@@ -31,6 +31,10 @@ impl GuestRam {
         self.ram_size
     }
 
+    pub fn region_count(&self) -> usize {
+        self.regions.len()
+    }
+
     pub fn write_bytes(&self, guest_address: u64, bytes: &[u8]) -> Result<()> {
         let region = self.find_region(guest_address, bytes.len())?;
         region.write_bytes(guest_address, bytes)
@@ -41,7 +45,6 @@ impl GuestRam {
         region.read_bytes(guest_address, bytes)
     }
 
-    #[allow(dead_code)]
     pub fn slice(&self, guest_address: u64, size: usize) -> Result<&[u8]> {
         let region = self.find_region(guest_address, size)?;
         region.slice(guest_address, size)
@@ -56,9 +59,17 @@ impl GuestRam {
         let region = self.find_region(guest_address, mem::size_of::<T>())?;
         region.write_int(guest_address, val)
     }
+
     pub fn read_int<T: Serializable>(&self, guest_address: u64) -> Result<T> {
         let region = self.find_region(guest_address, mem::size_of::<T>())?;
         region.read_int(guest_address)
+    }
+
+    #[allow(dead_code)]
+    pub fn end_addr(&self) -> u64 {
+        self.regions.iter()
+            .max_by_key(|r| r.guest_range.end())
+            .map_or(0, |r| r.guest_range.end())
     }
 
     pub fn is_valid_range(&self, guest_address: u64, size: usize) -> bool {
@@ -73,7 +84,7 @@ impl GuestRam {
 }
 
 fn add_region(regions: &mut Vec<MemoryRegion>, base: u64, size: usize, kvm: &Kvm) -> Result<()> {
-    let slot = regions.len();
+    let slot = regions.len() as u32;
     let mr = MemoryRegion::new(base, size)?;
     kvm.add_memory_region(slot, base, mr.mapping.address(), size)
         .map_err(|e| Error::new(ErrorKind::RegisterMemoryFailed, e))?;

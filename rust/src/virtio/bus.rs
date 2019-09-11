@@ -1,7 +1,7 @@
 use std::sync::{Arc,RwLock};
 use crate::vm::io::IoDispatcher;
 use crate::kvm::Kvm;
-use crate::memory::{GuestRam,AddressRange};
+use crate::memory::{AddressRange, MemoryManager};
 use super::{VirtioDevice,VirtioDeviceOps,PciIrq};
 use super::consts::*;
 use super::pci::PciBus;
@@ -10,14 +10,14 @@ use crate::vm::Result;
 
 pub struct VirtioBus {
     kvm: Kvm,
-    memory: GuestRam,
+    memory: MemoryManager,
     io_dispatcher: Arc<IoDispatcher>,
     pci_bus: Arc<RwLock<PciBus>>,
     devices: Vec<Arc<RwLock<VirtioDevice>>>,
 }
 
 impl VirtioBus {
-    pub fn new(memory: GuestRam, io_dispatcher: Arc<IoDispatcher>, kvm: Kvm) -> VirtioBus {
+    pub fn new(memory: MemoryManager, io_dispatcher: Arc<IoDispatcher>, kvm: Kvm) -> VirtioBus {
         VirtioBus {
             kvm,
             memory,

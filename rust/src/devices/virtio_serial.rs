@@ -4,7 +4,7 @@ use std::thread::spawn;
 use termios::*;
 
 use crate::virtio::{VirtioDeviceOps,VirtioBus, VirtQueue};
-use crate::memory::GuestRam;
+use crate::memory::MemoryManager;
 use crate::vm::Result;
 
 const VIRTIO_ID_CONSOLE: u16 = 3;
@@ -40,7 +40,7 @@ impl VirtioSerial {
             .register()
     }
 
-    fn start_console(&self, _memory: GuestRam, q: VirtQueue) {
+    fn start_console(&self, _memory: &MemoryManager, q: VirtQueue) {
         spawn(move || {
             loop {
                 q.wait_ready().unwrap();
@@ -81,7 +81,7 @@ impl VirtioDeviceOps for VirtioSerial {
     }
 
 
-    fn start(&mut self, memory: GuestRam, mut queues: Vec<VirtQueue>) {
+    fn start(&mut self, memory: &MemoryManager, mut queues: Vec<VirtQueue>) {
         let mut term = Terminal::create(queues.remove(0));
         self.start_console(memory, queues.remove(0));
 
@@ -208,6 +208,8 @@ impl Terminal {
                 } else {
                     abort_cnt += 1;
                 }
+            } else {
+                println!("n = {}", n);
             }
 
             if abort_cnt == 3 {

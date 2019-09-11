@@ -8,7 +8,7 @@ use self::io::IoDispatcher;
 use crate::virtio::VirtioBus;
 use crate::devices;
 
-use crate::memory::{GuestRam,KVM_KERNEL_LOAD_ADDRESS};
+use crate::memory::{GuestRam, KVM_KERNEL_LOAD_ADDRESS, MemoryManager, SystemAllocator, AddressRange};
 use crate::kvm::*;
 
 
@@ -63,7 +63,7 @@ impl VmConfig {
 }
 pub struct Vm {
     kvm: Kvm,
-    memory: GuestRam,
+    memory: MemoryManager,
     io_dispatcher: Arc<IoDispatcher>,
     _virtio: VirtioBus,
 }
@@ -80,6 +80,14 @@ static REQUIRED_EXTENSIONS: &[u32] = &[
     KVM_CAP_IOEVENTFD,
 ];
 
+fn get_base_dev_pfn(mem_size: u64) -> u64 {
+    // Put device memory at a 2MB boundary after physical memory or 4gb, whichever is greater.
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * MB;
+    let mem_size_round_2mb = (mem_size + 2 * MB - 1) / (2 * MB) * (2 * MB);
+    std::cmp::max(mem_size_round_2mb, 4 * GB) / 4096
+}
+
 impl Vm {
     pub fn open(config: VmConfig) -> Result<Vm> {
         let mut kvm = Kvm::open(&REQUIRED_EXTENSIONS)?;
@@ -87,16 +95,20 @@ impl Vm {
         kvm.set_tss_addr(0xFFFbd000)?;
         kvm.create_pit2()?;
 
-        let memory = GuestRam::new(config.ram_size, &kvm)?;
+        let ram = GuestRam::new(config.ram_size, &kvm)?;
+        let dev_addr_start = get_base_dev_pfn(config.ram_size as u64) * 4096;
+        let dev_addr_size = u64::max_value() - dev_addr_start;
+        let allocator = SystemAllocator::new(AddressRange::new(dev_addr_start,dev_addr_size as usize));
+        let memory = MemoryManager::new(kvm.clone(), ram, allocator);
 
         kvm.create_irqchip()?;
 
         let verbose = env::args().any(|arg| arg == "-v");
         let cmdline = KernelCmdLine::new_default(verbose);
 
-        cmdline.write_to_memory(&memory)?;
+        cmdline.write_to_memory(memory.guest_ram())?;
         let path = PathBuf::from(&config.kernel_path);
-        setup::kernel::load_pm_kernel(&memory, &path, cmdline.address(), cmdline.size())?;
+        setup::kernel::load_pm_kernel(memory.guest_ram(), &path, cmdline.address(), cmdline.size())?;
 
         let io_dispatch = IoDispatcher::new();
 
@@ -126,8 +138,8 @@ impl Vm {
     pub fn start(&self) -> Result<()> {
         let mut handles = Vec::new();
         for vcpu in self.kvm.get_vcpus() {
-            setup::cpu::setup_protected_mode(&vcpu, KVM_KERNEL_LOAD_ADDRESS + 0x200, &self.memory)?;
-            let mut run_area = KvmRunArea::new(vcpu,  self.io_dispatcher.clone())?;
+            setup::cpu::setup_protected_mode(&vcpu, KVM_KERNEL_LOAD_ADDRESS + 0x200, self.memory.guest_ram())?;
+            let mut run_area = KvmRunArea::new(vcpu, shutdown.clone(), self.io_dispatcher.clone())?;
             let h = thread::spawn(move || run_area.run());
             handles.push(h);
         }
