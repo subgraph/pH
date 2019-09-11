@@ -32,7 +32,6 @@ impl Event {
 
 pub struct EPoll {
     fd: RawFd,
-    events: PollEvents,
 }
 
 impl EPoll {
@@ -41,7 +40,6 @@ impl EPoll {
             -1 => Err(Error::last_os_error()),
             fd => Ok(EPoll {
                 fd,
-                events: PollEvents::new(),
             })
         }
     }

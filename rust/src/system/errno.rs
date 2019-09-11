@@ -16,10 +16,6 @@ impl Error {
     pub fn last_os_error() -> Error {
         Error(unsafe { *__errno_location() })
     }
-
-    pub fn errno(self) -> i32 {
-        self.0
-    }
 }
 
 impl From<io::Error> for Error {
