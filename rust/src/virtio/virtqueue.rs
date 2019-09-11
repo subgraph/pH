@@ -1,5 +1,6 @@
 use std::sync::atomic::{Ordering, AtomicUsize, AtomicBool};
 use std::sync::Arc;
+use std::os::unix::io::AsRawFd;
 
 use crate::memory::GuestRam;
 use crate::kvm::Kvm;
@@ -64,6 +65,11 @@ impl VirtQueue {
         }
     }
 
+    pub fn next_chain(&self) -> Option<Chain> {
+        self.pop_avail_entry()
+            .map(|idx| Chain::new(self.memory.clone(), self.clone(), idx, self.vring.size()))
+    }
+
     pub fn on_each_chain<F>(&self, mut f: F)
         where F: FnMut(Chain) {
         loop {
@@ -112,6 +118,10 @@ impl VirtQueue {
     pub fn load_descriptor(&self, idx: u16) -> Option<Descriptor> {
         self.vring.load_descriptor(idx)
     }
+
+    pub fn ioevent(&self) -> &IoEventFd {
+        &self.ioeventfd
+    }
 }
 
 pub struct QueueIter {
@@ -141,7 +151,7 @@ impl InterruptLine {
 
     fn new(kvm: &Kvm, irq: u8) -> Result<Arc<InterruptLine>> {
         let irqfd = EventFd::new()?;
-        kvm.irqfd(irqfd.raw_fd() as u32, irq as u32)?;
+        kvm.irqfd(irqfd.as_raw_fd() as u32, irq as u32)?;
         Ok(Arc::new(InterruptLine{
             irqfd,
             isr: AtomicUsize::new(0)
