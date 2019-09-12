@@ -34,6 +34,11 @@ pub fn move_mount(source: &str, target: &str) -> io::Result<()> {
     mount(source, target, "", libc::MS_MOVE, None)
 }
 
+pub fn mount_9p(name: &str, target: &str) -> io::Result<()> {
+    const MS_LAZYTIME: libc::c_ulong = (1 << 25);
+    mount(name, target, "9p", libc::MS_NOATIME|MS_LAZYTIME, Some("trans=virtio,version=9p2000.L,cache=loose"))
+}
+
 
 fn cstr(s: &str) -> CString {
     CString::new(s).unwrap()
@@ -157,6 +162,4 @@ pub fn reboot(cmd: libc::c_int) -> io::Result<()> {
         }
         Ok(())
     }
-
-
 }

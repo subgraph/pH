@@ -1,6 +1,6 @@
 extern crate libc;
 
-use std::io;
+use std::{io, fs};
 use std::process::{self, Child,Command,Stdio};
 use std::os::unix::process::CommandExt;
 
@@ -65,6 +65,10 @@ fn setup_mounts() -> io::Result<()> {
     mount_devtmpfs("/dev")?;
     mkdir("/dev/pts")?;
     mount_devpts("/dev/pts")?;
+    match mount_9p("home", "/home/user") {
+        Ok(()) => { println!("Home mounted at /home/user") },
+        Err(e) => { println!("Mount of home failed: {}", e) }
+    }
     Ok(())
 }
 
@@ -77,7 +81,7 @@ fn setup() -> io::Result<()> {
     Ok(())
 }
 
-fn run_shell() -> io::Result<Child>{
+unsafe fn run_shell() -> io::Result<Child>{
     Command::new("/bin/bash")
         .env_clear()
         .env("TERM", "xterm-256color")
@@ -85,7 +89,7 @@ fn run_shell() -> io::Result<Child>{
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .before_exec(|| {println!("{}", SPLASH);Ok(())})
+        .pre_exec(|| {println!("{}", SPLASH);Ok(())})
         .spawn()
 }
 
@@ -109,12 +113,27 @@ fn wait_for_child() -> i32 {
     }
     handle_waitpid_err(r.err().unwrap());
 }
+fn is_run_systemd() -> bool {
+    let cmdline = match fs::read_to_string("/proc/cmdline") {
+        Ok(cmdline) => cmdline,
+        _  => return false,
+    };
+    cmdline.contains("phinit.run_systemd")
+}
+fn run_systemd() {
+    let err = Command::new("/usr/lib/systemd/systemd")
+        .exec();
+    println!("failed to launch systemd: {}", err);
+}
 
 fn main() {
     if let Err(err) = setup() {
         println!("Error on setup(): {:?}", err); return;
     }
-    let _child = match run_shell() {
+    if is_run_systemd() {
+        run_systemd()
+    }
+    let _child = match unsafe { run_shell() } {
         Ok(child) => child,
         Err(err) => { println!("Error launching shell: {:?}", err); return; }
     };
