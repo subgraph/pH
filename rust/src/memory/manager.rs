@@ -26,6 +26,10 @@ impl MemoryManager {
         &self.ram
     }
 
+    pub fn kvm_mut(&mut self) -> &mut Kvm {
+        &mut self.kvm
+    }
+
     pub fn kvm(&self) -> &Kvm {
         &self.kvm
     }

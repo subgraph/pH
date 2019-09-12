@@ -1,4 +1,4 @@
-use std::result;
+use std::{result, io};
 use std::error;
 use std::fmt;
 use std::str;
@@ -10,6 +10,8 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum ErrorKind {
+    KernelNotFound,
+    InitNotFound,
     InvalidAddress(u64),
     InvalidMappingOffset(usize),
     RegisterMemoryFailed,
@@ -22,12 +24,15 @@ pub enum ErrorKind {
     CreateVmFailed,
     BadVersion,
     EventFdError,
-    DiskImageOpen(disk::Error)
+    DiskImageOpen(disk::Error),
+    TerminalTermios(io::Error),
 }
 
 impl ErrorKind {
     fn as_str(&self) -> &'static str {
         match *self {
+            ErrorKind::KernelNotFound => "Could not find kernel image",
+            ErrorKind::InitNotFound => "Could not find init image",
             ErrorKind::InvalidAddress(..) => "Invalid guest memory address",
             ErrorKind::InvalidMappingOffset(..) => "Invalid memory mapping offset",
             ErrorKind::RegisterMemoryFailed => "Failed to register memory region",
@@ -41,6 +46,7 @@ impl ErrorKind {
             ErrorKind::BadVersion => "unexpected kvm api version",
             ErrorKind::EventFdError => "eventfd error",
             ErrorKind::DiskImageOpen(_) => "failed to open disk image",
+            ErrorKind::TerminalTermios(_) => "failed termios",
         }
     }
 }
@@ -52,6 +58,7 @@ impl fmt::Display for ErrorKind {
             ErrorKind::InvalidMappingOffset(offset) => write!(f, "{}: 0x{:x}", self.as_str(), offset),
             ErrorKind::IoctlFailed(name) => write!(f, "Ioctl {} failed", name),
             ErrorKind::DiskImageOpen(ref e) => write!(f, "failed to open disk image: {}", e),
+            ErrorKind::TerminalTermios(ref e) => write!(f, "error reading/restoring terminal state: {}", e),
             _ => write!(f, "{}", self.as_str()),
         }
     }

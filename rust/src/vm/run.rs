@@ -4,6 +4,7 @@ use crate::kvm::KvmVcpu;
 use crate::memory::Mapping;
 use super::Result;
 use super::io::IoDispatcher;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const KVM_EXIT_UNKNOWN:u32 = 0;
 const KVM_EXIT_IO:u32 = 2;
@@ -17,6 +18,7 @@ pub struct KvmRunArea {
     vcpu: KvmVcpu,
     io: Arc<IoDispatcher>,
     mapping: Mapping,
+    shutdown: Arc<AtomicBool>,
 }
 
 pub struct IoExitData {
@@ -34,13 +36,14 @@ pub struct MmioExitData {
 }
 
 impl KvmRunArea {
-    pub fn new(vcpu: KvmVcpu, io_dispatcher: Arc<IoDispatcher>) -> Result<KvmRunArea> {
+    pub fn new(vcpu: KvmVcpu, shutdown: Arc<AtomicBool>, io_dispatcher: Arc<IoDispatcher>) -> Result<KvmRunArea> {
         let size = vcpu.get_vcpu_mmap_size()?;
         let mapping = Mapping::new_from_fd(vcpu.raw_fd(), size)?;
         Ok(KvmRunArea{
             vcpu,
             io: io_dispatcher,
             mapping,
+            shutdown,
         })
     }
 
@@ -97,6 +100,9 @@ impl KvmRunArea {
             } else {
                self.handle_exit();
             }
+            if self.shutdown.load(Ordering::Relaxed) {
+                return;
+            }
         }
     }
 
@@ -106,8 +112,8 @@ impl KvmRunArea {
             KVM_EXIT_IO => { self.handle_exit_io() },
             KVM_EXIT_MMIO => { self.handle_exit_mmio() },
             KVM_EXIT_INTR => { println!("intr")},
-            KVM_EXIT_SHUTDOWN => { println!("shut");
-                self.handle_problem();
+            KVM_EXIT_SHUTDOWN => {
+                self.handle_shutdown();
             },
             KVM_EXIT_SYSTEM_EVENT => { println!("event")},
             KVM_EXIT_INTERNAL_ERROR => {
@@ -120,7 +126,11 @@ impl KvmRunArea {
         }
     }
 
-    fn handle_problem(&mut self) {
+    fn handle_shutdown(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+    }
+
+    fn _handle_problem(&mut self) {
         let regs = self.vcpu.get_regs().unwrap();
         let sregs = self.vcpu.get_sregs().unwrap();
         println!("REGS:\n{:?}", regs);
