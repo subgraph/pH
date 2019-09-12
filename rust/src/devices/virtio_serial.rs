@@ -80,6 +80,12 @@ impl VirtioDeviceOps for VirtioSerial {
         true
     }
 
+    fn read_config(&mut self, offset: usize, _size: usize) -> u64 {
+        if offset == 4 {
+            return 1;
+        }
+        0
+    }
 
     fn start(&mut self, memory: &MemoryManager, mut queues: Vec<VirtQueue>) {
         let mut term = Terminal::create(queues.remove(0));
@@ -93,17 +99,10 @@ impl VirtioDeviceOps for VirtioSerial {
             let mut control = Control::new(queues.remove(0), queues.remove(0));
             spawn(move || {
                 control.run();
-
             });
         }
     }
 
-    fn read_config(&mut self, offset: usize, _size: usize) -> u64 {
-        if offset == 4 {
-            return 1;
-        }
-        0
-    }
 }
 
 struct Control {
@@ -111,7 +110,6 @@ struct Control {
     tx_vq: VirtQueue,
 }
 
-use byteorder::{LittleEndian,ReadBytesExt,WriteBytesExt};
 impl Control {
     fn new(rx: VirtQueue, tx: VirtQueue) -> Control {
         Control { rx_vq: rx, tx_vq: tx }
@@ -120,9 +118,9 @@ impl Control {
     fn run(&mut self) {
         let mut rx = self.rx_vq.clone();
         self.tx_vq.on_each_chain(|mut chain| {
-            let _id = chain.read_u32::<LittleEndian>().unwrap();
-            let event = chain.read_u16::<LittleEndian>().unwrap();
-            let _value = chain.read_u16::<LittleEndian>().unwrap();
+            let _id = chain.r32().unwrap();
+            let event = chain.r16().unwrap();
+            let _value = chain.r16().unwrap();
             if event == VIRTIO_CONSOLE_DEVICE_READY {
                 Control::send_msg(&mut rx,0, VIRTIO_CONSOLE_DEVICE_ADD, 1).unwrap();
             }
@@ -138,9 +136,9 @@ impl Control {
 
     fn send_msg(vq: &mut VirtQueue, id: u32, event: u16, val: u16) -> io::Result<()> {
         let mut chain = vq.wait_next_chain().unwrap();
-        chain.write_u32::<LittleEndian>(id)?;
-        chain.write_u16::<LittleEndian>(event)?;
-        chain.write_u16::<LittleEndian>(val)?;
+        chain.w32(id)?;
+        chain.w16(event)?;
+        chain.w16(val)?;
         chain.flush_chain();
         Ok(())
     }
@@ -148,11 +146,11 @@ impl Control {
     fn send_resize(vq: &mut VirtQueue, id: u32) -> io::Result<()> {
         let (cols, rows) = Control::stdin_terminal_size()?;
         let mut chain = vq.wait_next_chain().unwrap();
-        chain.write_u32::<LittleEndian>(id)?;
-        chain.write_u16::<LittleEndian>(VIRTIO_CONSOLE_RESIZE)?;
-        chain.write_u16::<LittleEndian>(0)?;
-        chain.write_u16::<LittleEndian>(rows)?;
-        chain.write_u16::<LittleEndian>(cols)?;
+        chain.w32(id)?;
+        chain.w16(VIRTIO_CONSOLE_RESIZE)?;
+        chain.w16(0)?;
+        chain.w16(rows)?;
+        chain.w16(cols)?;
         chain.flush_chain();
         Ok(())
     }
@@ -171,7 +169,7 @@ impl Control {
 }
 
 struct Terminal {
-    saved: Termios,
+    saved: Option<Termios>,
     vq: VirtQueue,
 }
 
@@ -179,16 +177,22 @@ impl Terminal {
     fn create(vq: VirtQueue) -> Terminal {
         let termios = Termios::from_fd(0).unwrap();
         Terminal {
-            saved: termios,
+            saved: Some(termios),
             vq,
         }
     }
 
     fn setup_term(&self) {
-        let mut termios = self.saved.clone();
-        termios.c_iflag &= !(ICRNL);
-        termios.c_lflag &= !(ISIG|ICANON|ECHO);
-        let _ = tcsetattr(0, TCSANOW, &termios);
+        if let Some(mut termios) = self.saved {
+            termios.c_iflag &= !(ICRNL);
+            termios.c_lflag &= !(ISIG | ICANON | ECHO);
+            let _ = tcsetattr(0, TCSANOW, &termios);
+        }
+    }
+    fn restore_term(&mut self) {
+        if let Some(termios) = self.saved.take() {
+            let _ = tcsetattr(0, TCSANOW, &termios);
+        }
     }
 
     fn read_loop(&mut self) {
@@ -213,7 +217,7 @@ impl Terminal {
             }
 
             if abort_cnt == 3 {
-                let _ = tcsetattr(0, TCSANOW, &self.saved);
+                self.restore_term();
             }
 
         }
@@ -223,6 +227,6 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        let _ = tcsetattr(0, TCSANOW, &self.saved);
+        self.restore_term();
     }
 }
