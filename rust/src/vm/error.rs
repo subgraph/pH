@@ -10,8 +10,6 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
 pub enum ErrorKind {
-    KernelNotFound,
-    InitNotFound,
     InvalidAddress(u64),
     InvalidMappingOffset(usize),
     RegisterMemoryFailed,
@@ -26,13 +24,12 @@ pub enum ErrorKind {
     EventFdError,
     DiskImageOpen(disk::Error),
     TerminalTermios(io::Error),
+    IoError(io::Error),
 }
 
 impl ErrorKind {
     fn as_str(&self) -> &'static str {
         match *self {
-            ErrorKind::KernelNotFound => "Could not find kernel image",
-            ErrorKind::InitNotFound => "Could not find init image",
             ErrorKind::InvalidAddress(..) => "Invalid guest memory address",
             ErrorKind::InvalidMappingOffset(..) => "Invalid memory mapping offset",
             ErrorKind::RegisterMemoryFailed => "Failed to register memory region",
@@ -47,6 +44,7 @@ impl ErrorKind {
             ErrorKind::EventFdError => "eventfd error",
             ErrorKind::DiskImageOpen(_) => "failed to open disk image",
             ErrorKind::TerminalTermios(_) => "failed termios",
+            ErrorKind::IoError(_) => "i/o error",
         }
     }
 }
@@ -59,11 +57,18 @@ impl fmt::Display for ErrorKind {
             ErrorKind::IoctlFailed(name) => write!(f, "Ioctl {} failed", name),
             ErrorKind::DiskImageOpen(ref e) => write!(f, "failed to open disk image: {}", e),
             ErrorKind::TerminalTermios(ref e) => write!(f, "error reading/restoring terminal state: {}", e),
+            ErrorKind::IoError(ref e) => write!(f, "i/o error: {}", e),
             _ => write!(f, "{}", self.as_str()),
         }
     }
 }
 
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Error {
+        ErrorKind::IoError(err).into()
+    }
+
+}
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Error {
         Error { repr: Repr::Simple(kind) }

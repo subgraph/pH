@@ -12,20 +12,16 @@ fn add_defaults(cmdline: &mut KernelCmdLine) {
         // keyboard reboot
         .push("reboot=k")
         .push_set_true("panic")
-        .push_set_val("tsc", "reliable")
-        .push("no_timer_check")
-        // faster rcu updates
-        .push_set_true("rcuupdate.rcu_expedited")
-        // then restore to normal after booting
-        .push_set_true("rcuupdate.rcu_normal_after_boot")
+
+        .push("init_on_alloc=0")
+        .push("init_on_free=0")
         .push_set_val("console", "hvc0")
 
         .push_set_true("i8042.direct")
         .push_set_true("i8042.dumbkbd")
         .push_set_true("i8042.nopnp")
         .push_set_true("i8042.noaux")
-        .push("noreplace-smp")
-        //.push("initcall_debug")
+   //     .push("initcall_debug")
         .push_set_val("iommu", "off")
         .push("cryptomgr.notests")
 

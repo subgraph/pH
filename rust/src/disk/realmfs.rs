@@ -1,6 +1,6 @@
 use crate::disk::{Result, DiskImage, SECTOR_SIZE, RawDiskImage, OpenType};
 use std::fs::File;
-use std::path::Path;
+use std::path::PathBuf;
 
 // skip 4096 byte realmfs header
 const HEADER_SECTOR_COUNT: usize = 8;
@@ -11,10 +11,13 @@ pub struct RealmFSImage {
 
 // Just pass everything through to raw image for now
 impl RealmFSImage {
-    pub fn open<P: AsRef<Path>>(path: P, read_only: bool) -> Result<Self> {
-        let open_type = if read_only { OpenType::ReadOnly } else { OpenType::MemoryOverlay };
-        let raw = RawDiskImage::open_with_offset(path, open_type, HEADER_SECTOR_COUNT * SECTOR_SIZE)?;
-        Ok(RealmFSImage { raw })
+    pub fn new<P: Into<PathBuf>>(path: P, open_type: OpenType) -> Self {
+        let offset = HEADER_SECTOR_COUNT * SECTOR_SIZE;
+        let raw = RawDiskImage::new_with_offset(path, open_type, offset);
+        RealmFSImage { raw }
+    }
+    pub fn open(&mut self) -> Result<()> {
+        self.raw.open()
     }
 }
 
@@ -27,7 +30,7 @@ impl DiskImage for RealmFSImage {
         self.raw.sector_count()
     }
 
-    fn disk_file(&self) -> &File {
+    fn disk_file(&mut self) -> Result<&mut File> {
         self.raw.disk_file()
     }
 

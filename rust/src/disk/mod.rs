@@ -25,14 +25,15 @@ pub enum OpenType {
 pub trait DiskImage: Sync+Send {
     fn read_only(&self) -> bool;
     fn sector_count(&self) -> u64;
-    fn disk_file(&self) -> &File;
+    fn disk_file(&mut self) -> Result<&mut File>;
 
-    fn seek_to_sector(&self, sector: u64) -> Result<()> {
+    fn seek_to_sector(&mut self, sector: u64) -> Result<()> {
         if sector > self.sector_count() {
             return Err(Error::BadSectorOffset(sector));
         }
         let offset = SeekFrom::Start(sector * SECTOR_SIZE as u64);
-        self.disk_file().seek(offset)
+        let file = self.disk_file()?;
+        file.seek(offset)
             .map_err(Error::DiskSeek)?;
         Ok(())
     }
@@ -67,6 +68,7 @@ pub enum Error {
     DiskSeek(io::Error),
     BadSectorOffset(u64),
     MemoryOverlayCreate(system::Error),
+    NotOpen,
 }
 
 impl error::Error for Error {}
@@ -83,6 +85,7 @@ impl fmt::Display for Error {
             DiskSeek(err) => write!(f, "error seeking to offset on disk image: {}", err),
             BadSectorOffset(sector) => write!(f, "attempt to access invalid sector offset {}", sector),
             MemoryOverlayCreate(err) => write!(f, "failed to create memory overlay: {}", err),
+            NotOpen => write!(f, "disk not open"),
         }
     }
 }

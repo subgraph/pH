@@ -1,44 +1,67 @@
 use std::path::{PathBuf, Path};
-use crate::vm::{Vm, Result, ErrorKind};
+use crate::vm::Vm;
 use std::{env, process};
-
-pub enum RootFS {
-    SelfRoot,
-    RealmFSImage(PathBuf),
-    RawImage(PathBuf),
-    RawOffset(PathBuf, usize),
-}
+use crate::devices::SyntheticFS;
+use crate::disk::{RawDiskImage, RealmFSImage, OpenType};
+use libcitadel::Realms;
+use libcitadel::terminal::{TerminalPalette, AnsiTerminal};
 
 pub struct VmConfig {
     ram_size: usize,
     ncpus: usize,
     verbose: bool,
+    rootshell: bool,
+    home: String,
     launch_systemd: bool,
     kernel_path: Option<PathBuf>,
     init_path: Option<PathBuf>,
     init_cmd: Option<String>,
-    rootfs: RootFS,
+    raw_disks: Vec<RawDiskImage>,
+
+    realmfs_images: Vec<RealmFSImage>,
+    realm_name: Option<String>,
+    synthetic: Option<SyntheticFS>,
 }
 
 #[allow(dead_code)]
 impl VmConfig {
-    pub fn new(args: env::Args) -> VmConfig {
+    pub fn new() -> VmConfig {
         let mut config = VmConfig {
             ram_size: 256 * 1024 * 1024,
             ncpus: 1,
             verbose: false,
+            rootshell: false,
+            home: String::from("/home/user"),
             launch_systemd: false,
             kernel_path: None,
             init_path: None,
             init_cmd: None,
-            rootfs: RootFS::SelfRoot,
+            realm_name: None,
+            raw_disks: Vec::new(),
+            realmfs_images: Vec::new(),
+            synthetic: None,
         };
-        config.parse_args(args);
+        config.parse_args();
         config
     }
 
     pub fn ram_size_megs(mut self, megs: usize) -> Self {
         self.ram_size = megs * 1024 * 1024;
+        self
+    }
+
+    pub fn raw_disk_image<P: Into<PathBuf>>(mut self, path: P, open_type: OpenType) -> Self {
+        self.raw_disks.push(RawDiskImage::new(path, open_type));
+        self
+    }
+
+    pub fn raw_disk_image_with_offset<P: Into<PathBuf>>(mut self, path: P, open_type: OpenType, offset: usize) -> Self {
+        self.raw_disks.push(RawDiskImage::new_with_offset(path, open_type, offset));
+        self
+    }
+
+    pub fn realmfs_image<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.realmfs_images.push(RealmFSImage::new(path, OpenType::MemoryOverlay));
         self
     }
 
@@ -62,27 +85,20 @@ impl VmConfig {
         self
     }
 
-    pub fn use_realmfs<P: Into<PathBuf>>(mut self, path: P) -> Self {
-        self.rootfs = RootFS::RealmFSImage(path.into());
-        self
-    }
-
-    pub fn use_rawdisk<P: Into<PathBuf>>(mut self, path: P) -> Self {
-        self.rootfs = RootFS::RawImage(path.into());
-        self
-    }
-
-    pub fn use_rawdisk_with_offset<P: Into<PathBuf>>(mut self, path: P, offset: usize) -> Self {
-        self.rootfs = RootFS::RawOffset(path.into(), offset);
-        self
-    }
-
     pub fn use_systemd(mut self) -> Self {
         self.launch_systemd = true;
         self
     }
 
+    pub fn synthetic_fs(mut self, sfs: SyntheticFS) -> Self {
+        self.synthetic = Some(sfs);
+        self
+    }
+
     pub fn boot(self) {
+
+        let _terminal_restore = TerminalRestore::save();
+
         match Vm::open(self) {
             Ok(vm) => if let Err(err) = vm.start() {
                 notify!("Error starting VM: {}", err);
@@ -103,83 +119,155 @@ impl VmConfig {
         self.verbose
     }
 
+    pub fn rootshell(&self) -> bool {
+        self.rootshell
+    }
+
+    pub fn homedir(&self) -> &str {
+        &self.home
+    }
+
     pub fn launch_systemd(&self) -> bool {
         self.launch_systemd
     }
 
-    pub fn get_kernel_path(&self) -> Result<PathBuf> {
-        match self.kernel_path {
-            Some(ref path) if path.exists() => return Ok(path.to_path_buf()),
-            None => if let Some(path) = Self::search_kernel() {
-                return Ok(path)
-            }
-            _ => {},
-        }
-        Err(ErrorKind::KernelNotFound.into())
+    pub fn has_block_image(&self) -> bool {
+        !(self.realmfs_images.is_empty() && self.raw_disks.is_empty())
     }
 
-    pub fn get_init_path(&self) -> Result<PathBuf> {
-        match self.init_path {
-            Some(ref path) if path.exists() => return Ok(path.to_path_buf()),
-            None => if let Some(path) = Self::search_init() {
-                return Ok(path)
-            }
-            _ => {},
-        }
-        Err(ErrorKind::InitNotFound.into())
+    pub fn get_realmfs_images(&mut self) -> Vec<RealmFSImage> {
+        self.realmfs_images.drain(..).collect()
+    }
+
+    pub fn get_raw_disk_images(&mut self) -> Vec<RawDiskImage> {
+        self.raw_disks.drain(..).collect()
+    }
+
+    pub fn get_synthetic_fs(&self) -> Option<SyntheticFS> {
+        self.synthetic.clone()
     }
 
     pub fn get_init_cmdline(&self) -> Option<&str> {
         self.init_cmd.as_ref().map(|s| s.as_str())
     }
 
-    pub fn rootfs(&self) -> &RootFS {
-        &self.rootfs
+    pub fn realm_name(&self) -> Option<&str> {
+        self.realm_name.as_ref().map(|s| s.as_str())
     }
 
-    fn search_init() -> Option<PathBuf> {
-        Self::search_binary("ph-init", &[
-            "rust/target/release", "rust/target/debug",
-            "target/debug", "target/release"
-        ])
+    fn add_realmfs_by_name(&mut self, realmfs: &str) {
+        let path = Path::new("/realms/realmfs-images")
+            .join(format!("{}-realmfs.img", realmfs));
+        if !path.exists() {
+            eprintln!("Realmfs image does not exist at {}", path.display());
+            process::exit(1);
+        }
+        self.realmfs_images.push(RealmFSImage::new(path, OpenType::MemoryOverlay));
     }
 
-    fn search_kernel() -> Option<PathBuf> {
-        Self::search_binary("ph_linux", &["kernel", "../kernel"])
+    fn add_realm_by_name(&mut self, realm: &str) {
+        let realms = Realms::load().unwrap();
+        if let Some(realm) = realms.by_name(realm) {
+            let config = realm.config();
+            let realmfs = config.realmfs();
+            self.add_realmfs_by_name(realmfs);
+            self.home = realm.base_path().join("home").display().to_string();
+            self.realm_name = Some(realm.name().to_string())
+        }
     }
 
-    fn search_binary(name: &str, paths: &[&str]) -> Option<PathBuf> {
-        let cwd = match env::current_dir() {
-            Ok(cwd) => cwd,
-            _ => return None,
-        };
+    fn parse_args(&mut self) {
+        let args = ProgramArgs::new();
+        if args.has_arg("-v") {
+            self.verbose = true;
+        }
+        if args.has_arg("--root") {
+            self.rootshell = true;
+        }
+        if let Some(home) = args.arg_with_value("--home") {
+            self.home = home.to_string();
+        }
+        if let Some(realmfs) = args.arg_with_value("--realmfs") {
+            self.add_realmfs_by_name(realmfs);
+        }
+        if let Some(realm) = args.arg_with_value("--realm") {
+            self.add_realm_by_name(realm);
+        }
+    }
+}
 
-        for p in paths {
-            let p = Path::new(p).join(name);
-            let current = if p.is_absolute() {
-                p
-            } else {
-                cwd.join(p)
-            };
-            if current.exists() {
-                return Some(current);
+struct ProgramArgs {
+    args: Vec<String>,
+}
+
+impl ProgramArgs {
+    fn new() -> Self {
+        ProgramArgs {
+            args: env::args().skip(1).collect(),
+        }
+    }
+
+    fn has_arg(&self, name: &str) -> bool {
+        self.args.iter().any(|arg| arg.as_str() == name)
+    }
+
+    fn arg_with_value(&self, name: &str) -> Option<&str> {
+        let mut iter = self.args.iter();
+        while let Some(arg) = iter.next() {
+            if arg.as_str() == name {
+                match iter.next() {
+                    Some(val) => return Some(val.as_str()),
+                    None => {
+                        eprintln!("Expected value for {} argument", name);
+                        process::exit(1);
+                    }
+                }
             }
         }
         None
     }
+}
 
-    fn parse_args(&mut self, args: env::Args) {
-        for arg in args.skip(1) {
-            self.parse_one_arg(&arg);
+pub struct TerminalRestore {
+    saved: Option<TerminalPalette>,
+}
+
+impl TerminalRestore {
+    pub fn save() -> Self {
+        let mut term = match AnsiTerminal::new() {
+            Ok(term) => term,
+            Err(e) => {
+                warn!("failed to open terminal: {}", e);
+                return TerminalRestore { saved: None }
+            }
+        };
+
+        let mut palette = TerminalPalette::default();
+        if let Err(e) = palette.load(&mut term) {
+            warn!("failed to load palette: {}", e);
+            return TerminalRestore { saved: None }
+        }
+        if let Err(e) = term.clear_screen() {
+            warn!("failed to clear screen: {}", e);
+            return TerminalRestore { saved: None }
+        }
+        TerminalRestore { saved: Some(palette) }
+    }
+
+    fn restore(&self) {
+        if let Some(p) = self.saved.as_ref() {
+            let mut term = match AnsiTerminal::new() {
+                Ok(term) => term,
+                _ => return,
+            };
+            let _ = p.apply(&mut term);
         }
     }
 
-    fn parse_one_arg(&mut self, arg: &str) {
-        if arg == "-v" {
-            self.verbose = true;
-        } else {
-            eprintln!("Unrecognized command line argument: {}", arg);
-            process::exit(1);
-        }
+}
+
+impl Drop for TerminalRestore {
+    fn drop(&mut self) {
+        self.restore();
     }
 }

@@ -1,11 +1,9 @@
 
-use std::path::Path;
-use std::fs::{File};
-use std::io::{self, Read,SeekFrom,Seek};
+use std::io::{self, Read, SeekFrom, Seek, Cursor};
 use byteorder::{LittleEndian,ReadBytesExt};
 
 use crate::memory::{self,GuestRam,KERNEL_ZERO_PAGE};
-use crate::vm::{Result,Error,ErrorKind};
+use crate::vm::{Result, Error, ErrorKind, KERNEL};
 
 
 // Documentation/x86/boot.txt
@@ -64,13 +62,13 @@ fn setup_zero_page(memory: &GuestRam, cmdline_addr: u64, cmdline_size: usize) ->
     setup_e820(memory, base)
 }
 
-pub fn load_pm_kernel(memory: &GuestRam, path: &Path, cmdline_addr: u64, cmdline_size: usize) -> Result<()> {
-    load_elf_kernel(memory, path).map_err(|_| Error::from(ErrorKind::ReadKernelFailed))?;
+pub fn load_pm_kernel(memory: &GuestRam, cmdline_addr: u64, cmdline_size: usize) -> Result<()> {
+    load_elf_kernel(memory).map_err(|_| Error::from(ErrorKind::ReadKernelFailed))?;
     setup_zero_page(memory,  cmdline_addr, cmdline_size)
 }
 
-pub fn load_elf_kernel(memory: &GuestRam, path: &Path) -> io::Result<()> {
-    let mut f = File::open(&path)?;
+pub fn load_elf_kernel(memory: &GuestRam) -> io::Result<()> {
+    let mut f = Cursor::new(KERNEL);
     f.seek(SeekFrom::Start(32))?;
     let phoff = f.read_u64::<LittleEndian>()?;
     f.seek(SeekFrom::Current(16))?;
@@ -78,7 +76,7 @@ pub fn load_elf_kernel(memory: &GuestRam, path: &Path) -> io::Result<()> {
     f.seek(SeekFrom::Start(phoff))?;
     let mut v = Vec::new();
     for _ in 0..phnum {
-        let hdr = load_phdr(&f)?;
+        let hdr = load_phdr(&mut f)?;
         if hdr.p_type == 1 {
             v.push(hdr);
         }
@@ -92,7 +90,7 @@ pub fn load_elf_kernel(memory: &GuestRam, path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn load_phdr<R: Read+Sized>(mut r: R) -> io::Result<ElfPhdr> {
+fn load_phdr<R: Read+Sized>(r: &mut R) -> io::Result<ElfPhdr> {
     let mut phdr: ElfPhdr = Default::default();
     phdr.p_type = r.read_u32::<LittleEndian>()?;
     phdr.p_flags = r.read_u32::<LittleEndian>()?;

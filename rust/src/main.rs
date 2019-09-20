@@ -13,11 +13,9 @@ mod virtio;
 mod disk;
 
 pub use log::{Logger,LogLevel};
-use std::env;
 
 fn main() {
-    vm::VmConfig::new(env::args())
+    vm::VmConfig::new()
         .ram_size_megs(1024)
-        .use_realmfs("/home/user/Shared/main-realmfs.img")
         .boot();
 }

@@ -378,6 +378,7 @@ impl SyntheticFS {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn add_executable<P: AsRef<Path>, Q: AsRef<Path>>(&mut self, dirpath: P, filename: &str, realpath: Q) -> io::Result<()> {
         let realpath = realpath.as_ref();
         self.add_library_dependencies(realpath)?;

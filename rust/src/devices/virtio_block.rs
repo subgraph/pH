@@ -66,7 +66,7 @@ pub struct VirtioBlock<D: DiskImage+'static> {
 
 const VIRTIO_ID_BLOCK: u16 = 2;
 impl <D: DiskImage + 'static> VirtioBlock<D> {
-    fn new(disk_image: D) -> Self {
+    pub fn new(disk_image: D) -> Self {
         let mut config = DeviceConfigArea::new(8);
         config.write_u64(0, disk_image.sector_count());
         VirtioBlock {
@@ -192,7 +192,6 @@ impl <'a, D: DiskImage> MessageHandler<'a, D> {
         }
     }
 
-
     fn sector_round(sz: usize) -> usize {
         (sz / SECTOR_SIZE) * SECTOR_SIZE
     }
@@ -204,7 +203,7 @@ impl <'a, D: DiskImage> MessageHandler<'a, D> {
 
         self.disk.read_sectors(self.sector, buffer)
             .map_err(Error::DiskRead)?;
-        self.chain.inc_offset(len);
+        self.chain.inc_offset(len, true);
         Ok(())
     }
 
@@ -215,7 +214,7 @@ impl <'a, D: DiskImage> MessageHandler<'a, D> {
 
         self.disk.write_sectors(self.sector, buffer)
             .map_err(Error::DiskWrite)?;
-        self.chain.inc_offset(len);
+        self.chain.inc_offset(len, false);
         Ok(())
     }
 

@@ -1,13 +1,16 @@
-use std::thread;
+use std::{thread, fs};
 
 use self::io::IoDispatcher;
 
 use crate::virtio::VirtioBus;
 use crate::devices;
-use crate::disk;
 
 use crate::memory::{GuestRam, KVM_KERNEL_LOAD_ADDRESS, MemoryManager, SystemAllocator, AddressRange};
 use crate::kvm::*;
+
+static KERNEL: &[u8] = include_bytes!("../../kernel/ph_linux");
+static PHINIT: &[u8] = include_bytes!("../../target/release/ph-init");
+static SOMMELIER: &[u8] = include_bytes!("../../sommelier/sommelier");
 
 mod run;
 pub mod io;
@@ -25,11 +28,8 @@ use self::run::KvmRunArea;
 use self::kernel_cmdline::KernelCmdLine;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use crate::disk::OpenType;
 use termios::Termios;
-use crate::vm::config::RootFS;
-use std::path::Path;
-
+use crate::devices::SyntheticFS;
 
 pub struct Vm {
     _config: VmConfig,
@@ -76,61 +76,66 @@ impl Vm {
         Ok(MemoryManager::new(kvm, ram, allocator))
     }
 
-    fn setup_virtio(config: &VmConfig, cmdline: &mut KernelCmdLine, virtio: &mut VirtioBus) -> Result<()> {
+    fn setup_virtio(config: &mut VmConfig, cmdline: &mut KernelCmdLine, virtio: &mut VirtioBus) -> Result<()> {
         devices::VirtioSerial::create(virtio)?;
         devices::VirtioRandom::create(virtio)?;
         devices::VirtioWayland::create(virtio)?;
-        let init_path = config.get_init_path()?;
-        devices::VirtioP9::create(virtio, "home", "/home/user", &init_path)?;
+        devices::VirtioP9::create(virtio, "home", config.homedir(), false, false)?;
 
-        Self::setup_rootfs(config, cmdline, virtio, &init_path)
+        let mut block_root = false;
+
+        for mut disk in config.get_realmfs_images() {
+            disk.open().map_err(ErrorKind::DiskImageOpen)?;
+            devices::VirtioBlock::create(virtio, disk)?;
+            block_root = true;
+        }
+        for mut disk in config.get_raw_disk_images() {
+            disk.open().map_err(ErrorKind::DiskImageOpen)?;
+            devices::VirtioBlock::create(virtio, disk)?;
+            block_root = true;
+        }
+
+        if block_root {
+            cmdline.push("phinit.root=/dev/vda");
+            cmdline.push("phinit.rootfstype=ext4");
+        } else {
+            devices::VirtioP9::create(virtio, "9proot", "/", true, false)?;
+            cmdline.push_set_val("phinit.root", "9proot");
+            cmdline.push_set_val("phinit.rootfstype", "9p");
+            cmdline.push_set_val("phinit.rootflags", "trans=virtio");
+        }
+
+        Self::setup_synthetic_bootfs(cmdline, virtio)
     }
 
-    fn setup_rootfs(config: &VmConfig, cmdline: &mut KernelCmdLine, virtio: &mut VirtioBus, init_path: &Path) -> Result<()> {
-        match config.rootfs() {
-            RootFS::SelfRoot => {
-                devices::VirtioP9::create(virtio, "/dev/root", "/", &init_path)?;
-                notify!("9p root");
-                cmdline.push_set_val("root", "/dev/root");
-                cmdline.push("ro");
-                cmdline.push_set_val("rootfstype", "9p");
-                cmdline.push_set_val("rootflags", "trans=virtio,version=9p2000.L,cache=loose");
-                cmdline.push_set_val("init", "/phinit");
-            },
-            RootFS::RealmFSImage(ref path) => {
-                let disk = disk::RealmFSImage::open(path, false)
-                    .map_err(ErrorKind::DiskImageOpen)?;
-                devices::VirtioBlock::create(virtio, disk)?;
-                cmdline.push_set_val("root", "/dev/vda");
-                cmdline.push("rw");
-                cmdline.push_set_val("init", "/usr/bin/ph-init");
-            },
-            RootFS::RawImage(ref path) => {
-                let disk = disk::RawDiskImage::open(path, OpenType::MemoryOverlay).map_err(ErrorKind::DiskImageOpen)?;
-                devices::VirtioBlock::create(virtio, disk)?;
-                cmdline.push_set_val("root", "/dev/vda");
-                cmdline.push("rw");
-            },
-            RootFS::RawOffset(path, offset) => {
-                let disk = disk::RawDiskImage::open_with_offset(path, OpenType::ReadWrite, *offset)
-                    .map_err(ErrorKind::DiskImageOpen)?;
-                devices::VirtioBlock::create(virtio, disk)?;
-                cmdline.push_set_val("root", "/dev/vda");
-                cmdline.push("rw");
-                cmdline.push_set_val("init", "/usr/bin/ph-init");
-            }
-        };
+    fn setup_synthetic_bootfs(cmdline: &mut KernelCmdLine, virtio: &mut VirtioBus) -> Result<()> {
+        let mut s = SyntheticFS::new();
+        s.mkdirs(&["/tmp", "/proc", "/sys", "/dev", "/home/user", "/bin", "/etc"]);
+
+        fs::write("/tmp/ph-init", PHINIT)?;
+        s.add_library_dependencies("/tmp/ph-init")?;
+        fs::remove_file("/tmp/ph-init")?;
+
+        s.add_memory_file("/usr/bin", "ph-init", 0o755, PHINIT)?;
+        s.add_memory_file("/usr/bin", "sommelier", 0o755, SOMMELIER)?;
+
+        s.add_file("/etc", "ld.so.cache", 0o644, "/etc/ld.so.cache");
+        devices::VirtioP9::create_with_filesystem(s, virtio, "/dev/root", "/", false)?;
+        cmdline.push_set_val("init", "/usr/bin/ph-init");
+        cmdline.push_set_val("root", "/dev/root");
+        cmdline.push("ro");
+        cmdline.push_set_val("rootfstype", "9p");
+        cmdline.push_set_val("rootflags", "trans=virtio");
         Ok(())
     }
 
-    pub fn open(config: VmConfig) -> Result<Vm> {
-        let kernel_path = config.get_kernel_path()?;
+    pub fn open(mut config: VmConfig) -> Result<Vm> {
 
         let mut memory = Self::create_memory_manager(config.ram_size())?;
 
         let mut cmdline = KernelCmdLine::new_default();
 
-        setup::kernel::load_pm_kernel(memory.guest_ram(), &kernel_path, cmdline.address(), cmdline.size())?;
+        setup::kernel::load_pm_kernel(memory.guest_ram(), cmdline.address(), cmdline.size())?;
 
         let io_dispatch = IoDispatcher::new();
 
@@ -144,13 +149,19 @@ impl Vm {
         } else {
             cmdline.push("quiet");
         }
+        if config.rootshell() {
+            cmdline.push("phinit.rootshell");
+        }
+        if let Some(realm) = config.realm_name() {
+            cmdline.push_set_val("phinit.realm", realm);
+        }
 
         let saved= Termios::from_fd(0)
             .map_err(ErrorKind::TerminalTermios)?;
         let termios = Some(saved);
 
         let mut virtio = VirtioBus::new(memory.clone(), io_dispatch.clone(), memory.kvm().clone());
-        Self::setup_virtio(&config, &mut cmdline, &mut virtio)?;
+        Self::setup_virtio(&mut config, &mut cmdline, &mut virtio)?;
 
         if config.launch_systemd() {
             cmdline.push("phinit.run_systemd");
@@ -191,6 +202,5 @@ impl Vm {
         }
         Ok(())
     }
-
 }
 
