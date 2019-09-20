@@ -109,7 +109,7 @@ impl WaylandDevice {
             let events = match poll.wait() {
                 Ok(v) => v,
                 Err(e) => {
-                    warn!("error waiting for poll events: {}", e);
+                    warn!("virtio_wl: error waiting for poll events: {}", e);
                     break;
                 }
             };
@@ -137,7 +137,7 @@ impl WaylandDevice {
                     },
                     Self::KILL_TOKEN => break 'poll,
                     Self::VFDS_TOKEN => self.vfd_manager.process_poll_events(),
-                    _ =>  warn!("unexpected poll token value"),
+                    _ =>  warn!("virtio_wl: unexpected poll token value"),
                 }
             };
         }
@@ -246,7 +246,7 @@ impl <'a> MessageHandler<'a> {
         let vfd = match self.device.get_vfd(vfd_id) {
             Some(vfd) => vfd,
             None => {
-                warn!("Received unexpected vfd id 0x{:08x}", vfd_id);
+                warn!("virtio_wl: Received unexpected vfd id 0x{:08x}", vfd_id);
                 return Ok(None);
             }
         };
