@@ -1,0 +1,8 @@
+# Set build arguments here. See `gn buildargs`.
+pkg_config = "/usr/bin/pkg-config"
+libdir = "/usr/lib/x86_64-linux-gnu/"
+platform_subdir="vm_tools/sommelier"
+cxx="g++"
+cc="gcc"
+ar="/usr/bin/ar"
+#use.amd64=true

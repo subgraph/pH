@@ -1,0 +1,145 @@
+# Copyright 2019 The Chromium OS Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("wayland_protocol.gni")
+
+group("all") {
+  deps = [
+    ":sommelier",
+    ":wayland_demo",
+    ":x11_demo",
+  ]
+}
+
+if (!defined(peer_cmd_prefix)) {
+#  if (use.amd64) {
+    peer_cmd_prefix = "\"/opt/google/cros-containers/lib/ld-linux-x86-64.so.2 --library-path /opt/google/cros-containers/lib --inhibit-rpath \\\"\\\"\""
+#  }
+#  if (use.arm) {
+#    peer_cmd_prefix = "\"/opt/google/cros-containers/lib/ld-linux-armhf.so.3 --library-path /opt/google/cros-containers/lib --inhibit-rpath \\\"\\\"\""
+#  }
+}
+
+# Set this to the Xwayland path.
+if (!defined(xwayland_path)) {
+  xwayland_path = "\"/opt/google/cros-containers/bin/Xwayland\""
+}
+
+# Set this to the GL driver path to use for Xwayland.
+if (!defined(xwayland_gl_driver_path)) {
+  xwayland_gl_driver_path = "\"/opt/google/cros-containers/lib\""
+}
+
+# Set this to the shm driver to use for Xwayland.
+if (!defined(xwayland_shm_driver)) {
+  xwayland_shm_driver = "\"virtwl\""
+}
+
+# Set this to the shm driver to use for wayland clients.
+if (!defined(shm_driver)) {
+  shm_driver = "\"virtwl-dmabuf\""
+}
+
+# Set this to the virtwl device.
+if (!defined(virtwl_device)) {
+  virtwl_device = "\"/dev/wl0\""
+}
+
+# Set this to the frame color to use for Xwayland clients.
+if (!defined(frame_color)) {
+  frame_color = "\"#f2f2f2\""
+}
+
+# Set this to the dark frame color to use for Xwayland clients.
+if (!defined(dark_frame_color)) {
+  dark_frame_color = "\"#323639\""
+}
+
+wayland_protocol_library("sommelier-protocol") {
+  out_dir = "include"
+  sources = [
+    "protocol/aura-shell.xml",
+    "protocol/drm.xml",
+    "protocol/gtk-shell.xml",
+    "protocol/keyboard-extension-unstable-v1.xml",
+    "protocol/linux-dmabuf-unstable-v1.xml",
+    "protocol/relative-pointer-unstable-v1.xml",
+    "protocol/text-input-unstable-v1.xml",
+    "protocol/viewporter.xml",
+    "protocol/xdg-shell-unstable-v6.xml",
+  ]
+}
+
+executable("sommelier") {
+  pkg_deps = [
+    "gbm",
+    "grpc++",
+    "libdrm",
+    "pixman-1",
+    "protobuf",
+    "vm_protos",
+    "wayland-client",
+    "wayland-server",
+    "xcb",
+    "xcb-composite",
+    "xcb-xfixes",
+    "xkbcommon",
+  ]
+  libs = [ "m" ]
+  deps = [
+    ":sommelier-protocol",
+  ]
+  sources = [
+    "sommelier-compositor.c",
+    "sommelier-data-device-manager.c",
+    "sommelier-display.c",
+    "sommelier-drm.c",
+    "sommelier-gtk-shell.c",
+    "sommelier-output.c",
+    "sommelier-relative-pointer-manager.c",
+    "sommelier-seat.c",
+    "sommelier-shell.c",
+    "sommelier-shm.c",
+    "sommelier-subcompositor.c",
+    "sommelier-text-input.c",
+    "sommelier-viewporter.c",
+    "sommelier-xdg-shell.c",
+    "sommelier.c",
+  ]
+  defines = [
+    "_GNU_SOURCE",
+    "WL_HIDE_DEPRECATED",
+    "XWAYLAND_PATH=${xwayland_path}",
+    "XWAYLAND_GL_DRIVER_PATH=${xwayland_gl_driver_path}",
+    "XWAYLAND_SHM_DRIVER=${xwayland_shm_driver}",
+    "SHM_DRIVER=${shm_driver}",
+    "VIRTWL_DEVICE=${virtwl_device}",
+    "PEER_CMD_PREFIX=${peer_cmd_prefix}",
+    "FRAME_COLOR=${frame_color}",
+    "DARK_FRAME_COLOR=${dark_frame_color}",
+  ]
+}
+
+executable("wayland_demo") {
+  pkg_deps = [
+    "libbrillo-${libbase_ver}",
+    "libchrome-${libbase_ver}",
+    "wayland-client",
+  ]
+  libs = [ "wayland-client" ]
+  sources = [
+    "demos/wayland_demo.cc",
+  ]
+}
+
+executable("x11_demo") {
+  pkg_deps = [
+    "libbrillo-${libbase_ver}",
+    "libchrome-${libbase_ver}",
+  ]
+  libs = [ "X11" ]
+  sources = [
+    "demos/x11_demo.cc",
+  ]
+}
