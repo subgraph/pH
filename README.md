@@ -7,8 +7,21 @@ for isolating desktop application running environments in Subgraph OS.
 Building pH
 -----------
 
+First you'll need to [install Rust](https://www.rust-lang.org/tools/install) of course. 
+
+Then make sure you have all the library build dependencies. The following apt command should pull in 
+everthing you need. If you don't already have build-essential installed, you'll need that too.
+
     $ sudo apt install wget bc libelf-dev pkg-config libwayland-dev libxcb-composite0-dev libxkbcommon-dev libgbm-dev libpixman-1-dev libdrm-dev libdbus-1-dev
     $ cargo build --release
+
+If you like to watch text scroll when you build things you can add -vv to the build command:
+
+    $ cargo build --release -vv
+
+The build will download and build a linux kernel, so it will may take a few minutes.  When the build completes, the pH binary can be found at:
+
+    target/release/pH
 
 Running pH
 ----------
