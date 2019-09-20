@@ -14,7 +14,7 @@ Running pH
 ----------
 
 After successfully building pH the only artifact you need is the pH binary itself. You can copy it
-anywhere any use it.
+anywhere and use it.
 
 If you run pH in citadel, you can simply pass it the name of a realm:
 
