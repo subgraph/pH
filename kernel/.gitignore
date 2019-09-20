@@ -1,3 +1,4 @@
 downloads/
-build/
+.work/
+linux-*/
 ph_linux*
