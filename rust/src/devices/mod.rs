@@ -8,6 +8,7 @@ mod virtio_block;
 
 pub use self::virtio_serial::VirtioSerial;
 pub use self::virtio_9p::VirtioP9;
+pub use self::virtio_9p::SyntheticFS;
 pub use self::virtio_rng::VirtioRandom;
 pub use self::virtio_wl::VirtioWayland;
 pub use self::virtio_block::VirtioBlock;

@@ -1,26 +1,16 @@
-use std::fs::Metadata;
-const P9_RLERROR: u8 = 7;
-use byteorder::{LittleEndian,ReadBytesExt,WriteBytesExt};
 use std::io::{self,Read,Write};
-use std::os::linux::fs::MetadataExt;
 use std::os::unix::ffi::OsStrExt;
 use std::ffi::OsStr;
+
+use libc;
+use byteorder::{LittleEndian,ReadBytesExt,WriteBytesExt};
+
+use crate::devices::virtio_9p::file::Qid;
 use crate::memory::GuestRam;
 use crate::virtio::Chain;
 
-use super::filesystem::StatFs;
-
-use libc;
-
-const P9_STATS_BASIC: u64 =  0x000007ff;
-
 const P9_HEADER_LEN: usize = 7;
-
-const P9_QTFILE: u8 = 0x00;
-const P9_QTLINK: u8 = 0x01;
-const _P9_QTSYMLINK: u8 = 0x02;
-
-const P9_QTDIR: u8 = 0x80;
+const P9_RLERROR: u8 = 7;
 
 pub struct PduParser<'a> {
     memory: GuestRam,
@@ -32,7 +22,7 @@ pub struct PduParser<'a> {
     reply_start_addr: u64,
 }
 
-#[derive(Default)]
+#[derive(Default,Debug)]
 pub struct P9Attr {
     valid: u32,
     mode: u32,
@@ -46,15 +36,15 @@ pub struct P9Attr {
 }
 
 impl P9Attr {
-    const MODE: u32 = (1 << 0);
-    const UID: u32 = (1 << 1);
-    const GID: u32 = (1 << 2);
-    const SIZE: u32 = (1 << 3);
-    const ATIME: u32 = (1 << 4);
-    const MTIME: u32 = (1 << 5);
-    const CTIME: u32 = (1 << 6);
-    const ATIME_SET: u32 = (1 << 7);
-    const MTIME_SET: u32 = (1 << 8);
+    const MODE: u32 = (1 << 0);      // 0x01
+    const UID: u32 = (1 << 1);       // 0x02
+    const GID: u32 = (1 << 2);       // 0x04
+    const SIZE: u32 = (1 << 3);      // 0x08
+    const ATIME: u32 = (1 << 4);     // 0x10
+    const MTIME: u32 = (1 << 5);     // 0x20
+    const CTIME: u32 = (1 << 6);     // 0x40
+    const ATIME_SET: u32 = (1 << 7); // 0x80
+    const MTIME_SET: u32 = (1 << 8); // 0x100
     const MASK: u32 = 127;
     const NO_UID: u32 = 0xFFFFFFFF;
 
@@ -75,6 +65,7 @@ impl P9Attr {
         self.valid & P9Attr::MASK == P9Attr::CTIME||
                 self.is_valid(P9Attr::UID|P9Attr::GID)
     }
+
     pub fn has_size(&self) -> bool { self.is_valid(P9Attr::SIZE) }
 
     pub fn mode(&self) -> u32 {
@@ -115,7 +106,6 @@ impl P9Attr {
     }
 }
 
-
 impl <'a> PduParser<'a> {
     pub fn new(chain: &'a mut Chain, memory: GuestRam) -> PduParser<'a> {
         PduParser{ memory, chain, size: 0, cmd: 0, tag: 0, reply_start_addr: 0 }
@@ -129,8 +119,9 @@ impl <'a> PduParser<'a> {
     }
 
     pub fn read_done(&mut self) -> io::Result<()> {
-        // XXX unwrap
-        self.reply_start_addr = self.chain.current_write_address(8).unwrap();
+        self.reply_start_addr = self.chain.current_write_address(8)
+            .ok_or(io::Error::from_raw_os_error(libc::EIO))?;
+
         // reserve header
         self.w32(0)?;
         self.w8(0)?;
@@ -138,20 +129,47 @@ impl <'a> PduParser<'a> {
         Ok(())
     }
 
+    fn error_code(err: io::Error) -> u32 {
+        if let Some(errno) = err.raw_os_error() {
+            return errno as u32;
+        }
+        let errno = match err.kind() {
+            io::ErrorKind::NotFound => libc::ENOENT,
+            io::ErrorKind::PermissionDenied => libc::EPERM,
+            io::ErrorKind::ConnectionRefused => libc::ECONNREFUSED,
+            io::ErrorKind::ConnectionReset => libc::ECONNRESET,
+            io::ErrorKind::ConnectionAborted => libc::ECONNABORTED,
+            io::ErrorKind::NotConnected => libc::ENOTCONN,
+            io::ErrorKind::AddrInUse => libc::EADDRINUSE,
+            io::ErrorKind::AddrNotAvailable => libc::EADDRNOTAVAIL,
+            io::ErrorKind::BrokenPipe => libc::EPIPE,
+            io::ErrorKind::AlreadyExists => libc::EEXIST,
+            io::ErrorKind::WouldBlock => libc::EWOULDBLOCK,
+            io::ErrorKind::InvalidInput => libc::EINVAL,
+            io::ErrorKind::InvalidData => libc::EINVAL,
+            io::ErrorKind::TimedOut => libc::ETIMEDOUT,
+            io::ErrorKind::WriteZero => libc::EIO,
+            io::ErrorKind::Interrupted => libc::EINTR,
+            io::ErrorKind::Other => libc::EIO,
+            io::ErrorKind::UnexpectedEof => libc::EIO,
+            _ => libc::EIO,
+        };
+        return errno as u32;
+    }
+
     pub fn bail_err(&mut self, error: io::Error) -> io::Result<()> {
+        let errno = Self::error_code(error);
+        self.write_err(errno)
+    }
+
+    pub fn write_err(&mut self, errno: u32) -> io::Result<()> {
         if self.reply_start_addr == 0 {
             self.read_done()?;
         }
-
-        let err = match error.raw_os_error() {
-            Some(errno) => errno as u32,
-            None => 0,
-        };
-
+        self.w32(errno)?;
         self._w32_at(0,P9_HEADER_LEN as u32 + 4);
         self._w8_at(4, P9_RLERROR);
         self._w16_at(5, self.tag);
-        self._w32_at(7, err);
         self.chain.flush_chain();
         Ok(())
     }
@@ -182,7 +200,6 @@ impl <'a> PduParser<'a> {
         self.memory.write_int::<u32>(self.reply_start_addr + offset as u64,  val).unwrap();
     }
 
-
     pub fn write_done(&mut self) -> io::Result<()> {
         self._w32_at(0, self.chain.get_wlen() as u32);
         let cmd = self.cmd + 1;
@@ -205,6 +222,16 @@ impl <'a> PduParser<'a> {
         Ok(s)
     }
 
+    pub fn read_string_list(&mut self) -> io::Result<Vec<String>> {
+        let count = self.r16()?;
+        let mut strings = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let s = self.read_string()?;
+            strings.push(s);
+        }
+        Ok(strings)
+    }
+
     pub fn read_attr(&mut self) -> io::Result<P9Attr> {
         let mut attr = P9Attr::new();
         attr.parse(self)?;
@@ -212,8 +239,9 @@ impl <'a> PduParser<'a> {
     }
 
     pub fn write_string(&mut self, str: &str) -> io::Result<()> {
-        self.w16(str.len() as u16)?;
-        self.chain.write_all(str.as_bytes())
+        let bytes = str.as_bytes();
+        self.w16(bytes.len() as u16)?;
+        self.chain.write_all(bytes)
     }
 
     pub fn write_os_string(&mut self, str: &OsStr) -> io::Result<()> {
@@ -221,70 +249,11 @@ impl <'a> PduParser<'a> {
         self.chain.write_all(str.as_bytes())
     }
 
-
-    fn is_lnk(meta: &Metadata) -> bool {
-        meta.st_mode() & libc::S_IFMT == libc::S_IFLNK
-    }
-
-    fn meta_to_qtype(meta: &Metadata) -> u8 {
-        if meta.is_dir() {
-            P9_QTDIR
-        } else if PduParser::is_lnk(meta) {
-            P9_QTLINK
-        } else {
-            P9_QTFILE
+    pub fn write_qid_list(&mut self, list: &[Qid]) -> io::Result<()> {
+        self.w16(list.len() as u16)?;
+        for qid in list {
+            qid.write(self)?;
         }
-    }
-
-    pub fn write_qid(&mut self, meta: &Metadata) -> io::Result<()> {
-        // type
-        self.w8(PduParser::meta_to_qtype(meta))?;
-        // version
-        self.w32(meta.st_mtime() as u32 ^ (meta.st_size() << 8) as u32)?;
-        // path
-        self.w64(meta.st_ino())
-    }
-
-    pub fn write_qid_path_only(&mut self, ino: u64) -> io::Result<()> {
-        self.w8(0)?;
-        self.w32(0)?;
-        self.w64(ino)
-    }
-
-    pub fn write_statl(&mut self, st: &Metadata) -> io::Result<()> {
-        self.w64(P9_STATS_BASIC)?;
-        self.write_qid(&st)?;
-        self.w32(st.st_mode())?;
-        self.w32(st.st_uid())?;
-        self.w32(st.st_gid())?;
-        self.w64(st.st_nlink())?;
-        self.w64(st.st_rdev())?;
-        self.w64(st.st_size())?;
-        self.w64(st.st_blksize())?;
-        self.w64(st.st_blocks())?;
-        self.w64(st.st_atime() as u64)?;
-        self.w64(st.st_atime_nsec() as u64)?;
-        self.w64(st.st_mtime() as u64)?;
-        self.w64(st.st_mtime_nsec() as u64)?;
-        self.w64(st.st_ctime() as u64)?;
-        self.w64(st.st_ctime_nsec() as u64)?;
-        self.w64(0)?;
-        self.w64(0)?;
-        self.w64(0)?;
-        self.w64(0)?;
-        Ok(())
-    }
-
-    pub fn write_statfs(&mut self, statfs: StatFs) -> io::Result<()> {
-        self.w32(statfs.f_type)?;
-        self.w32(statfs.f_bsize)?;
-        self.w64(statfs.f_blocks)?;
-        self.w64(statfs.f_bfree)?;
-        self.w64(statfs.f_bavail)?;
-        self.w64(statfs.f_files)?;
-        self.w64(statfs.f_ffree)?;
-        self.w64(statfs.fsid)?;
-        self.w32(statfs.f_namelen)?;
         Ok(())
     }
 
@@ -319,4 +288,3 @@ impl <'a> PduParser<'a> {
         self.chain.write_u64::<LittleEndian>(val)
     }
 }
-
