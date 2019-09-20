@@ -9,7 +9,7 @@ use crate::memory::{GuestRam, KVM_KERNEL_LOAD_ADDRESS, MemoryManager, SystemAllo
 use crate::kvm::*;
 
 static KERNEL: &[u8] = include_bytes!("../../kernel/ph_linux");
-static PHINIT: &[u8] = include_bytes!("../../target/release/ph-init");
+static PHINIT: &[u8] = include_bytes!("../../ph-init/target/release/ph-init");
 static SOMMELIER: &[u8] = include_bytes!("../../sommelier/sommelier");
 
 mod run;
