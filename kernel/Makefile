@@ -41,10 +41,6 @@ $(KERNEL_BUILD_PATH): $(KERNEL_DL_PATH) $(SHA256_SENTINEL)
 	rm -rf ./$(KERNEL_VERSION)
 	mv .work/$(KERNEL_VERSION) .
 
-#$(PATCH_SENTINEL): | $(KERNEL_BUILD_PATH)
-#	for p in $(PATCH_FILES); do patch -p1 -d $(KERNEL_VERSION) < "$$p"; done
-#	touch $@
-
 $(PH_LINUX_VER): $(KERNEL_BUILD_OUTPUT)
 	rm -f $(PH_LINUX)
 	cp $(KERNEL_BUILD_OUTPUT) $(PH_LINUX_VER)
