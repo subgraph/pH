@@ -128,12 +128,21 @@ impl Chain {
     /// load next descriptor if `current` descriptor
     /// has been fully consumed.
     ///
-    pub fn inc_offset(&mut self, sz: usize) {
+    fn _inc_offset(&mut self, sz: usize) {
         self.offset += sz;
         if self.offset >= self.current_size() {
             self.load_next_descriptor();
         }
     }
+
+    pub fn inc_offset(&mut self, sz: usize, write: bool) {
+        if write {
+            assert!(!self.is_current_readable());
+            self.wlen += sz;
+        }
+        self._inc_offset(sz)
+    }
+
 
     ///
     /// Read from the `current` readable descriptor and return
@@ -151,7 +160,7 @@ impl Chain {
         let nread = self.with_current_descriptor(0, |desc| {
             desc.read_from(&self.memory, self.offset, bytes)
         });
-        self.inc_offset(nread);
+        self._inc_offset(nread);
         nread
     }
 
@@ -170,7 +179,7 @@ impl Chain {
         let sz = self.with_current_descriptor(0, |desc| {
             desc.write_to(&self.memory, self.offset, bytes)
         });
-        self.inc_offset(sz);
+        self._inc_offset(sz);
         sz
     }
 
@@ -192,13 +201,17 @@ impl Chain {
 
     pub fn current_write_address(&mut self, size: usize) -> Option<u64> {
         self.skip_readable();
-        self.with_current_descriptor(None, |desc| {
-            if desc.len as usize - self.offset < size {
-                None
-            } else {
-                Some(desc.addr + self.offset as u64)
-            }
-        })
+        self.current_address(size)
+    }
+
+    pub fn current_address(&mut self, size: usize) -> Option<u64> {
+       self.with_current_descriptor(None, |desc| {
+           if desc.len as usize - self.offset < size {
+               None
+           } else {
+               Some(desc.addr + self.offset as u64)
+           }
+       })
     }
 
     pub fn get_wlen(&self) -> usize {
@@ -220,7 +233,7 @@ impl Chain {
             desc.write_from_reader(&self.memory, self.offset,r, size)
         });
         if let Ok(nread) = res {
-            self.inc_offset(nread);
+            self._inc_offset(nread);
             self.wlen += nread;
         }
         res
