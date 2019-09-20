@@ -28,9 +28,11 @@ SHA256_SENTINEL = .work/.sha256-verififed
 all: $(KERNEL_BUILD_OUTPUT) $(PH_LINUX_VER)
 	
 $(KERNEL_DL_PATH):
-	cd downloads; wget $(KERNEL_DOWNLOAD).tar.xz
-	cd downloads; unxz $(KERNEL_VERSION).tar.xz
-	cd downloads; wget $(KERNEL_DOWNLOAD).tar.sign
+	@echo "Downloading $(KERNEL_DOWNLOAD).tar.xz"
+	@cd downloads; rm -f $(KERNEL_VERSION).tar.xz
+	@cd downloads; wget --quiet $(KERNEL_DOWNLOAD).tar.xz
+	@cd downloads; unxz $(KERNEL_VERSION).tar.xz
+	@cd downloads; wget --quiet $(KERNEL_DOWNLOAD).tar.sign
 
 
 $(KERNEL_BUILD_PATH): $(KERNEL_DL_PATH) $(SHA256_SENTINEL)
