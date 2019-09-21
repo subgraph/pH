@@ -15,6 +15,8 @@ fn run_init() -> Result<()> {
     setup.set_splash(SPLASH);
     setup.setup_rootfs()?;
     setup.mount_home_if_exists()?;
+    let _child = setup.launch_sommelier();
+    let _dbus = setup.launch_dbus();
     setup.launch_shell()?;
     Ok(())
 }

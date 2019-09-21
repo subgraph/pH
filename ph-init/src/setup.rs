@@ -141,6 +141,53 @@ impl Setup {
         self.splash.borrow_mut().replace(splash.to_string());
     }
 
+    pub fn launch_sommelier(&self) -> Option<Child> {
+        println!("attempting to launch sommelier");
+        let result = Command::new("/opt/ph/usr/bin/sommelier")
+            .env("XDG_RUNTIME_DIR", "/run/user/1000")
+            .arg("--master")
+            .uid(1000)
+            .gid(1000)
+            .spawn();
+
+        match result {
+           Ok(child) => Some(child),
+            Err(e) => {
+                println!("sommelier didn't launch: {}", e);
+                None
+            }
+        }
+    }
+
+    pub fn launch_dbus(&self) -> Option<Child> {
+        println!("attempting to launch dbus");
+        let result = Command::new("/usr/bin/dbus-daemon")
+            .arg("--session")
+            .arg("--print-address")
+            .arg("--nosyslog")
+            .arg("--address=unix:path=/run/user/1000/bus")
+            .env("LANG", "en_US.UTF8")
+            .env("HOME", "/home/user") // XXX
+            .env("XDG_RUNTIME_DIR", "/run/user/1000")
+
+            .env("NO_AT_BRIDGE", "1")
+            .env("GNOME_DESKTOP_SESSION_ID", "this-is-deprecated")
+            .env("XDG_SESSION_TYPE", "wayland")
+            .env("WAYLAND_DISPLAY", "wayland-0")
+            .uid(1000)
+            .gid(1000)
+            .spawn();
+
+        match result {
+            Ok(child) => Some(child),
+            Err(e) => {
+                println!("dbus-daemon didn't launch: {}", e);
+                None
+            }
+        }
+
+    }
+
     fn run_shell(&self, as_root: bool) -> io::Result<Child> {
 
         let home = if as_root {
@@ -153,10 +200,18 @@ impl Setup {
         unsafe {
             let mut cmd = Command::new("/bin/bash");
             cmd.env_clear()
+                .env("GNOME_DESKTOP_SESSION_ID", "this-is-deprecated")
                 .env("XDG_RUNTIME_DIR", "/run/user/1000")
                 .env("HOME", home)
-                .env("SHELL", "/bin/bash")
+                .env("NO_AT_BRIDGE", "1")
+                .env("LANG", "en_US.UTF8")
+                .env("DISPLAY", ":0")
+                .env("XDG_SESSION_TYPE", "wayland")
+                .env("GDK_BACKEND", "wayland")
+                .env("WAYLAND_DISPLAY", "wayland-0")
+                .env("DBUS_SESSION_BUS_ADDRESS","unix:path=/run/user/1000/bus")
 
+                .env("SHELL", "/bin/bash")
                 .env("TERM", "xterm-256color")
                 .arg("--login")
                 .stdin(Stdio::inherit())
