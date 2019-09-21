@@ -251,19 +251,19 @@ impl FileSystemOps for FileSystem {
     }
 
     fn symlink(&self, target: &Path, linkpath: &Path) -> io::Result<()> {
-        let linkpath = self.canonicalize(linkpath)?;
+        let linkpath = self.canonicalize_parent(linkpath)?;
         unix::fs::symlink(target, linkpath)
     }
 
     fn link(&self, target: &Path, newpath: &Path) -> io::Result<()> {
         let target = self.canonicalize(target)?;
-        let newpath= self.canonicalize(newpath)?;
+        let newpath= self.canonicalize_parent(newpath)?;
         fs::hard_link(target, newpath)
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         let from = self.canonicalize(from)?;
-        let to = self.canonicalize(to)?;
+        let to = self.canonicalize_parent(to)?;
         fs::rename(from, to)
     }
 
@@ -278,7 +278,7 @@ impl FileSystemOps for FileSystem {
     }
 
     fn create_dir(&self, path: &Path, mode: u32) -> io::Result<()> {
-        let path = self.canonicalize(path)?;
+        let path = self.canonicalize_parent(path)?;
         fs::DirBuilder::new()
             .recursive(false)
             .mode(mode & 0o755)
