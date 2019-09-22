@@ -35,6 +35,9 @@ const P9_TWRITE: u8       = 118;
 const P9_TCLUNK: u8       = 120;
 const P9_REMOVE: u8       = 122;
 
+
+const P9_LOCK_FLAGS_BLOCK: u32 = 1;
+
 pub struct Server<T: FileSystemOps> {
     root: PathBuf,
     debug: bool,
@@ -110,8 +113,8 @@ impl <T: FileSystemOps> Server<T> {
             P9_TXATTRCREATE =>  self.p9_unsupported(pp)?,
             P9_TREADDIR => self.p9_readdir(pp)?,
             P9_TFSYNC => self.p9_fsync(pp)?,
-            P9_TLOCK => self.p9_unsupported(pp)?,
-            P9_TGETLOCK => self.p9_unsupported(pp)?,
+            P9_TLOCK => self.p9_lock(pp)?,
+            P9_TGETLOCK => self.p9_getlock(pp)?,
             P9_TUNLINKAT => self.p9_unlinkat(pp)?,
             P9_TLINK => self.p9_link(pp)?,
             P9_TMKDIR=> self.p9_mkdir(pp)?,
@@ -398,6 +401,54 @@ impl <T: FileSystemOps> Server<T> {
         } else {
             file.sync_data()?;
         }
+        pp.write_done()
+    }
+
+    fn p9_lock_args(&self, pp: &mut PduParser) -> io::Result<(&Fid<T>,u8,u32)> {
+        let fid = self.read_fid(pp)?;
+        let ltype = pp.r8()?;
+        let flags = pp.r32()?;
+        let _ = pp.r64()?;
+        let _ = pp.r64()?;
+        let _ = pp.r32()?;
+        let _ = pp.read_string()?;
+        pp.read_done()?;
+        Ok((fid, ltype, flags))
+    }
+
+    fn p9_lock(&mut self, pp: &mut PduParser) -> io::Result<()> {
+        let (fid, ltype,flags)= self.p9_lock_args(pp)?;
+        if flags & !P9_LOCK_FLAGS_BLOCK != 0 {
+            return system_error(libc::EINVAL);
+        }
+        let file = fid.file()?;
+        let status = file.flock(ltype)?;
+        pp.w8(status)?;
+        pp.write_done()
+    }
+
+    fn p9_getlock_args(&mut self, pp: &mut PduParser) -> io::Result<(&Fid<T>, u8, u64, u64, u32, String)> {
+        let fid = self.read_fid(pp)?;
+        let ltype = pp.r8()?;
+        let start = pp.r64()?;
+        let length= pp.r64()?;
+        let pid = pp.r32()?;
+        let client_id = pp.read_string()?;
+        pp.read_done()?;
+
+        Ok((fid, ltype, start, length, pid, client_id))
+    }
+
+    fn p9_getlock(&mut self, pp: &mut PduParser) -> io::Result<()> {
+        let (fid, ltype,start,length, pid, client_id) = self.p9_getlock_args(pp)?;
+
+        let file = fid.file()?;
+        let rtype = file.getlock(ltype)?;
+        pp.w8(rtype)?;
+        pp.w64(start)?;
+        pp.w64(length)?;
+        pp.w32(pid)?;
+        pp.write_string(&client_id)?;
         pp.write_done()
     }
 

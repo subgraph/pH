@@ -89,7 +89,6 @@ impl FileSystem {
     }
 
     fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-        let path = self.canonicalize(path)?;
         path.symlink_metadata()
     }
 
@@ -246,7 +245,7 @@ impl FileSystemOps for FileSystem {
     }
 
     fn readlink(&self, path: &Path) -> io::Result<OsString> {
-        let path = self.canonicalize(path)?;
+        let path = self.canonicalize_parent(path)?;
         fs::read_link(&path).map(|pbuf| pbuf.into_os_string())
     }
 

@@ -1,8 +1,9 @@
-use std::cell::{RefCell, RefMut};
+use std::cell::{RefCell, RefMut, Cell};
 use std::collections::BTreeMap;
 use std::{io, fmt};
 use std::path::{Path, PathBuf, Component};
 use std::fs::{Metadata, File};
+use std::os::unix::io::{RawFd,AsRawFd};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::fs::FileExt;
 
@@ -11,7 +12,6 @@ use crate::devices::virtio_9p::{
 };
 use std::io::{Cursor, SeekFrom, Seek, Read};
 use std::sync::{RwLock, Arc};
-
 
 pub const P9_DOTL_RDONLY: u32        = 0o00000000;
 pub const P9_DOTL_WRONLY: u32        = 0o00000001;
@@ -37,6 +37,21 @@ pub const P9_QTFILE: u8 = 0x00;
 pub const P9_QTSYMLINK: u8 = 0x02;
 pub const P9_QTDIR: u8 = 0x80;
 
+const P9_LOCK_SUCCESS: u8 = 0;
+const P9_LOCK_BLOCKED: u8 =1;
+const P9_LOCK_ERROR: u8 = 2;
+
+const P9_LOCK_TYPE_RDLCK: u8 = 0;
+const P9_LOCK_TYPE_WRLCK: u8 = 1;
+const P9_LOCK_TYPE_UNLCK: u8 = 2;
+
+#[derive(PartialEq,Copy,Clone)]
+enum LockType {
+    LockUn,
+    LockSh,
+    LockEx,
+}
+
 #[derive(Clone)]
 pub struct Buffer<T: AsRef<[u8]>>(Arc<RwLock<Cursor<T>>>);
 impl <T: AsRef<[u8]>> Buffer <T> {
@@ -61,21 +76,35 @@ enum FileObject {
     NotAFile,
 }
 
+impl FileObject {
+    fn fd(&self) -> Option<RawFd> {
+        match self {
+            FileObject::File(file) => Some(file.as_raw_fd()),
+            _ => None,
+        }
+    }
+}
+
 pub struct P9File {
     file: FileObject,
+    lock: Cell<LockType>,
 }
 
 impl P9File {
+
+    fn new(file: FileObject) -> Self {
+        P9File { file, lock: Cell::new(LockType::LockUn) }
+    }
     pub fn new_not_a_file() -> Self {
-        P9File { file: FileObject::NotAFile }
+        Self::new(FileObject::NotAFile)
     }
 
     pub fn from_file(file: File) -> Self {
-        P9File { file: FileObject::File(file) }
+        Self::new(FileObject::File(file))
     }
 
     pub fn from_buffer(buffer: Buffer<&'static [u8]>) -> Self {
-       P9File { file: FileObject::BufferFile(buffer) }
+        Self::new(FileObject::BufferFile(buffer))
     }
 
     pub fn sync_all(&self) -> io::Result<()> {
@@ -84,6 +113,7 @@ impl P9File {
             _ => Ok(()),
         }
     }
+
     pub fn sync_data(&self) -> io::Result<()> {
         match self.file {
             FileObject::File(ref f) => f.sync_data(),
@@ -105,6 +135,99 @@ impl P9File {
             FileObject::BufferFile(ref f) => f.write_at(buffer, offset),
             FileObject::NotAFile =>  Ok(0),
         }
+    }
+
+    fn map_locktype(ltype: u8) -> LockType {
+        match ltype {
+            P9_LOCK_TYPE_UNLCK => LockType::LockUn,
+            P9_LOCK_TYPE_RDLCK => LockType::LockSh,
+            P9_LOCK_TYPE_WRLCK => LockType::LockEx,
+            _ => LockType::LockUn,
+        }
+    }
+
+    fn errno() -> i32 {
+        unsafe { *libc::__errno_location() }
+    }
+
+    fn raw_flock(fd: RawFd, op: i32) -> u8 {
+        unsafe {
+            if libc::flock(fd, op) == -1 {
+                if Self::errno() == libc::EWOULDBLOCK {
+                    P9_LOCK_BLOCKED
+                } else {
+                    P9_LOCK_ERROR
+                }
+            } else {
+                P9_LOCK_SUCCESS
+            }
+        }
+    }
+
+    pub fn flock(&self, ltype: u8) -> io::Result<u8> {
+
+        let fd = match self.file.fd() {
+            Some(fd) => fd,
+            None => {
+                self.lock.set(Self::map_locktype(ltype));
+                return Ok(P9_LOCK_SUCCESS);
+            }
+        };
+
+        match ltype {
+            P9_LOCK_TYPE_UNLCK => {
+                let status = Self::raw_flock(fd, libc::LOCK_UN);
+                if status == P9_LOCK_SUCCESS {
+                    self.lock.set(LockType::LockUn);
+                }
+                Ok(status)
+            }
+            P9_LOCK_TYPE_WRLCK => {
+                let status = Self::raw_flock(fd, libc::LOCK_EX|libc::LOCK_NB);
+                if status == P9_LOCK_SUCCESS {
+                    self.lock.set(LockType::LockEx);
+                }
+                Ok(status)
+            }
+            P9_LOCK_TYPE_RDLCK => {
+                let status = Self::raw_flock(fd, libc::LOCK_SH|libc::LOCK_NB);
+                if status == P9_LOCK_SUCCESS {
+                    self.lock.set(LockType::LockSh);
+                }
+                Ok(status)
+            }
+            _ => system_error(libc::EINVAL),
+        }
+    }
+
+    pub fn getlock(&self, ltype: u8) -> io::Result<u8> {
+        let fd = match self.file.fd() {
+            Some(fd) => fd,
+            None => {
+                return Ok(P9_LOCK_TYPE_UNLCK);
+            }
+        };
+
+        match ltype {
+            P9_LOCK_TYPE_RDLCK => {
+                if self.lock.get() == LockType::LockUn {
+                    match Self::raw_flock(fd, libc::LOCK_NB|libc::LOCK_SH) {
+                        P9_LOCK_SUCCESS => { Self::raw_flock(fd, libc::LOCK_UN); }
+                        _ => return Ok(P9_LOCK_TYPE_WRLCK),
+                    }
+                }
+            }
+            P9_LOCK_TYPE_WRLCK => {
+                if self.lock.get() == LockType::LockUn {
+                    match Self::raw_flock(fd, libc::LOCK_NB|libc::LOCK_EX) {
+                        P9_LOCK_SUCCESS => { Self::raw_flock(fd, libc::LOCK_UN); },
+                        _ => return Ok(P9_LOCK_TYPE_WRLCK),
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(P9_LOCK_TYPE_UNLCK)
     }
 }
 
