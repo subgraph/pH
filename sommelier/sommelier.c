@@ -30,6 +30,7 @@
 #include "drm-server-protocol.h"
 #include "keyboard-extension-unstable-v1-client-protocol.h"
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
+#include "pointer-constraints-unstable-v1-client-protocol.h"
 #include "relative-pointer-unstable-v1-client-protocol.h"
 #include "text-input-unstable-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
@@ -63,7 +64,7 @@
 
 struct sl_data_source {
   struct sl_context* ctx;
-  struct wl_data_source *internal;
+  struct wl_data_source* internal;
 };
 
 enum {
@@ -74,6 +75,7 @@ enum {
   PROPERTY_WM_CLIENT_LEADER,
   PROPERTY_MOTIF_WM_HINTS,
   PROPERTY_NET_STARTUP_ID,
+  PROPERTY_NET_WM_STATE,
   PROPERTY_GTK_THEME_VARIANT,
 };
 
@@ -240,8 +242,7 @@ struct sl_sync_point* sl_sync_point_create(int fd) {
   return sync_point;
 }
 
-void sl_sync_point_destroy(struct sl_sync_point* sync_point)
-{
+void sl_sync_point_destroy(struct sl_sync_point* sync_point) {
   close(sync_point->fd);
   free(sync_point);
 }
@@ -358,7 +359,8 @@ static void sl_set_input_focus(struct sl_context* ctx,
         .type = ctx->atoms[ATOM_WM_PROTOCOLS].value,
         .data.data32 =
             {
-                ctx->atoms[ATOM_WM_TAKE_FOCUS].value, XCB_CURRENT_TIME,
+                ctx->atoms[ATOM_WM_TAKE_FOCUS].value,
+                XCB_CURRENT_TIME,
             },
     };
 
@@ -432,7 +434,7 @@ static void sl_internal_xdg_surface_configure(
 
   window->next_config.serial = serial;
   if (!window->pending_config.serial) {
-    struct wl_resource *host_resource;
+    struct wl_resource* host_resource;
     struct sl_host_surface* host_surface = NULL;
 
     host_resource =
@@ -460,7 +462,7 @@ static void sl_internal_xdg_toplevel_configure(
     struct wl_array* states) {
   struct sl_window* window = zxdg_toplevel_v6_get_user_data(xdg_toplevel);
   int activated = 0;
-  uint32_t *state;
+  uint32_t* state;
   int i = 0;
 
   if (!window->managed)
@@ -527,7 +529,8 @@ static void sl_internal_xdg_toplevel_close(
       .type = window->ctx->atoms[ATOM_WM_PROTOCOLS].value,
       .data.data32 =
           {
-              window->ctx->atoms[ATOM_WM_DELETE_WINDOW].value, XCB_CURRENT_TIME,
+              window->ctx->atoms[ATOM_WM_DELETE_WINDOW].value,
+              XCB_CURRENT_TIME,
           },
   };
 
@@ -565,7 +568,7 @@ static void sl_window_set_wm_state(struct sl_window* window, int state) {
 }
 
 void sl_window_update(struct sl_window* window) {
-  struct wl_resource *host_resource = NULL;
+  struct wl_resource* host_resource = NULL;
   struct sl_host_surface* host_surface;
   struct sl_context* ctx = window->ctx;
   struct sl_window* parent = NULL;
@@ -636,7 +639,7 @@ void sl_window_update(struct sl_window* window) {
     uint32_t parent_last_event_serial = 0;
 
     wl_list_for_each(sibling, &ctx->windows, link) {
-      struct wl_resource *sibling_host_resource;
+      struct wl_resource* sibling_host_resource;
       struct sl_host_surface* sibling_host_surface;
 
       if (!sibling->realized)
@@ -748,17 +751,20 @@ void sl_window_update(struct sl_window* window) {
                                     window->max_width / ctx->scale,
                                     window->max_height / ctx->scale);
     }
+    if (window->maximized) {
+      zxdg_toplevel_v6_set_maximized(window->xdg_toplevel);
+    }
   } else if (!window->xdg_popup) {
-    struct zxdg_positioner_v6 *positioner;
+    struct zxdg_positioner_v6* positioner;
 
     positioner = zxdg_shell_v6_create_positioner(ctx->xdg_shell->internal);
     assert(positioner);
-    zxdg_positioner_v6_set_anchor(positioner,
-                                  ZXDG_POSITIONER_V6_ANCHOR_TOP |
-                                      ZXDG_POSITIONER_V6_ANCHOR_LEFT);
-    zxdg_positioner_v6_set_gravity(positioner,
-                                   ZXDG_POSITIONER_V6_GRAVITY_BOTTOM |
-                                       ZXDG_POSITIONER_V6_GRAVITY_RIGHT);
+    zxdg_positioner_v6_set_anchor(
+        positioner,
+        ZXDG_POSITIONER_V6_ANCHOR_TOP | ZXDG_POSITIONER_V6_ANCHOR_LEFT);
+    zxdg_positioner_v6_set_gravity(
+        positioner,
+        ZXDG_POSITIONER_V6_GRAVITY_BOTTOM | ZXDG_POSITIONER_V6_GRAVITY_RIGHT);
     zxdg_positioner_v6_set_anchor_rect(
         positioner, (window->x - parent->x) / ctx->scale,
         (window->y - parent->y) / ctx->scale, 1, 1);
@@ -1102,6 +1108,18 @@ static void sl_registry_handler(void* data,
     ctx->relative_pointer_manager = relative_pointer;
     relative_pointer->host_global =
         sl_relative_pointer_manager_global_create(ctx);
+  } else if (strcmp(interface, "zwp_pointer_constraints_v1") == 0) {
+    struct sl_pointer_constraints* pointer_constraints =
+        malloc(sizeof(struct sl_pointer_constraints));
+    assert(pointer_constraints);
+    pointer_constraints->ctx = ctx;
+    pointer_constraints->id = id;
+    pointer_constraints->internal = wl_registry_bind(
+        registry, id, &zwp_pointer_constraints_v1_interface, 1);
+    assert(!ctx->pointer_constraints);
+    ctx->pointer_constraints = pointer_constraints;
+    pointer_constraints->host_global =
+        sl_pointer_constraints_global_create(ctx);
   } else if (strcmp(interface, "wl_data_device_manager") == 0) {
     struct sl_data_device_manager* data_device_manager =
         malloc(sizeof(struct sl_data_device_manager));
@@ -1295,6 +1313,12 @@ static void sl_registry_remover(void* data,
     ctx->relative_pointer_manager = NULL;
     return;
   }
+  if (ctx->pointer_constraints && ctx->pointer_constraints->id == id) {
+    sl_global_destroy(ctx->pointer_constraints->host_global);
+    free(ctx->pointer_constraints);
+    ctx->pointer_constraints = NULL;
+    return;
+  }
   wl_list_for_each(output, &ctx->outputs, link) {
     if (output->id == id) {
       sl_global_destroy(output->host_global);
@@ -1365,6 +1389,7 @@ static void sl_create_window(struct sl_context* ctx,
   window->managed = 0;
   window->realized = 0;
   window->activated = 0;
+  window->maximized = 0;
   window->allow_resize = 1;
   window->transient_for = XCB_WINDOW_NONE;
   window->client_leader = XCB_WINDOW_NONE;
@@ -1533,12 +1558,15 @@ static void sl_handle_map_request(struct sl_context* ctx,
       {PROPERTY_WM_CLIENT_LEADER, ctx->atoms[ATOM_WM_CLIENT_LEADER].value},
       {PROPERTY_MOTIF_WM_HINTS, ctx->atoms[ATOM_MOTIF_WM_HINTS].value},
       {PROPERTY_NET_STARTUP_ID, ctx->atoms[ATOM_NET_STARTUP_ID].value},
+      {PROPERTY_NET_WM_STATE, ctx->atoms[ATOM_NET_WM_STATE].value},
       {PROPERTY_GTK_THEME_VARIANT, ctx->atoms[ATOM_GTK_THEME_VARIANT].value},
   };
   xcb_get_geometry_cookie_t geometry_cookie;
   xcb_get_property_cookie_t property_cookies[ARRAY_SIZE(properties)];
   struct sl_wm_size_hints size_hints = {0};
   struct sl_mwm_hints mwm_hints = {0};
+  xcb_atom_t* reply_atoms;
+  bool maximize_h = false, maximize_v = false;
   uint32_t values[5];
   int i;
 
@@ -1595,48 +1623,67 @@ static void sl_handle_map_request(struct sl_context* ctx,
     }
 
     switch (properties[i].type) {
-    case PROPERTY_WM_NAME:
-      window->name = strndup(xcb_get_property_value(reply),
-                             xcb_get_property_value_length(reply));
-      break;
-    case PROPERTY_WM_CLASS: {
-      // WM_CLASS property contains two consecutive null-terminated strings.
-      // These specify the Instance and Class names. If a global app ID is
-      // not set then use Class name for app ID.
-      const char *value = xcb_get_property_value(reply);
-      int value_length = xcb_get_property_value_length(reply);
-      int instance_length = strnlen(value, value_length);
-      if (value_length > instance_length) {
-        window->clazz = strndup(value + instance_length + 1,
-                                value_length - instance_length - 1);
-      }
-    } break;
-    case PROPERTY_WM_TRANSIENT_FOR:
-      if (xcb_get_property_value_length(reply) >= 4)
-        window->transient_for = *((uint32_t *)xcb_get_property_value(reply));
-      break;
-    case PROPERTY_WM_NORMAL_HINTS:
-      if (xcb_get_property_value_length(reply) >= sizeof(size_hints))
-        memcpy(&size_hints, xcb_get_property_value(reply), sizeof(size_hints));
-      break;
-    case PROPERTY_WM_CLIENT_LEADER:
-      if (xcb_get_property_value_length(reply) >= 4)
-        window->client_leader = *((uint32_t *)xcb_get_property_value(reply));
-      break;
-    case PROPERTY_MOTIF_WM_HINTS:
-      if (xcb_get_property_value_length(reply) >= sizeof(mwm_hints))
-        memcpy(&mwm_hints, xcb_get_property_value(reply), sizeof(mwm_hints));
-      break;
-    case PROPERTY_NET_STARTUP_ID:
-      window->startup_id = strndup(xcb_get_property_value(reply),
-                                   xcb_get_property_value_length(reply));
-      break;
-    case PROPERTY_GTK_THEME_VARIANT:
-      if (xcb_get_property_value_length(reply) >= 4)
-        window->dark_frame = !strcmp(xcb_get_property_value(reply), "dark");
-      break;
-    default:
-      break;
+      case PROPERTY_WM_NAME:
+        window->name = strndup(xcb_get_property_value(reply),
+                               xcb_get_property_value_length(reply));
+        break;
+      case PROPERTY_WM_CLASS: {
+        // WM_CLASS property contains two consecutive null-terminated strings.
+        // These specify the Instance and Class names. If a global app ID is
+        // not set then use Class name for app ID.
+        const char* value = xcb_get_property_value(reply);
+        int value_length = xcb_get_property_value_length(reply);
+        int instance_length = strnlen(value, value_length);
+        if (value_length > instance_length) {
+          window->clazz = strndup(value + instance_length + 1,
+                                  value_length - instance_length - 1);
+        }
+      } break;
+      case PROPERTY_WM_TRANSIENT_FOR:
+        if (xcb_get_property_value_length(reply) >= 4)
+          window->transient_for = *((uint32_t*)xcb_get_property_value(reply));
+        break;
+      case PROPERTY_WM_NORMAL_HINTS:
+        if (xcb_get_property_value_length(reply) >= sizeof(size_hints))
+          memcpy(&size_hints, xcb_get_property_value(reply),
+                 sizeof(size_hints));
+        break;
+      case PROPERTY_WM_CLIENT_LEADER:
+        if (xcb_get_property_value_length(reply) >= 4)
+          window->client_leader = *((uint32_t*)xcb_get_property_value(reply));
+        break;
+      case PROPERTY_MOTIF_WM_HINTS:
+        if (xcb_get_property_value_length(reply) >= sizeof(mwm_hints))
+          memcpy(&mwm_hints, xcb_get_property_value(reply), sizeof(mwm_hints));
+        break;
+      case PROPERTY_NET_STARTUP_ID:
+        window->startup_id = strndup(xcb_get_property_value(reply),
+                                     xcb_get_property_value_length(reply));
+        break;
+      case PROPERTY_NET_WM_STATE:
+        reply_atoms = xcb_get_property_value(reply);
+        for (i = 0;
+             i < xcb_get_property_value_length(reply) / sizeof(xcb_atom_t);
+             ++i) {
+          if (reply_atoms[i] ==
+              ctx->atoms[ATOM_NET_WM_STATE_MAXIMIZED_HORZ].value) {
+            maximize_h = true;
+          } else if (reply_atoms[i] ==
+                     ctx->atoms[ATOM_NET_WM_STATE_MAXIMIZED_VERT].value) {
+            maximize_v = true;
+          }
+        }
+        // Neither wayland not CrOS support 1D maximizing, so sommelier will
+        // only consider a window maximized if both dimensions are. This
+        // behaviour is consistent with sl_handle_client_message().
+        window->maximized = maximize_h && maximize_v;
+        break;
+      case PROPERTY_GTK_THEME_VARIANT:
+        if (xcb_get_property_value_length(reply) >= 4)
+          window->dark_frame = !strcmp(xcb_get_property_value(reply), "dark");
+        break;
+      default:
+        break;
     }
     free(reply);
   }
@@ -1953,24 +2000,24 @@ static void sl_handle_configure_notify(struct sl_context* ctx,
 
 static uint32_t sl_resize_edge(int net_wm_moveresize_size) {
   switch (net_wm_moveresize_size) {
-  case NET_WM_MOVERESIZE_SIZE_TOPLEFT:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_TOP_LEFT;
-  case NET_WM_MOVERESIZE_SIZE_TOP:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_TOP;
-  case NET_WM_MOVERESIZE_SIZE_TOPRIGHT:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_TOP_RIGHT;
-  case NET_WM_MOVERESIZE_SIZE_RIGHT:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_RIGHT;
-  case NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_BOTTOM_RIGHT;
-  case NET_WM_MOVERESIZE_SIZE_BOTTOM:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_BOTTOM;
-  case NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_BOTTOM_LEFT;
-  case NET_WM_MOVERESIZE_SIZE_LEFT:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_LEFT;
-  default:
-    return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_NONE;
+    case NET_WM_MOVERESIZE_SIZE_TOPLEFT:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_TOP_LEFT;
+    case NET_WM_MOVERESIZE_SIZE_TOP:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_TOP;
+    case NET_WM_MOVERESIZE_SIZE_TOPRIGHT:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_TOP_RIGHT;
+    case NET_WM_MOVERESIZE_SIZE_RIGHT:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_RIGHT;
+    case NET_WM_MOVERESIZE_SIZE_BOTTOMRIGHT:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_BOTTOM_RIGHT;
+    case NET_WM_MOVERESIZE_SIZE_BOTTOM:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_BOTTOM;
+    case NET_WM_MOVERESIZE_SIZE_BOTTOMLEFT:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_BOTTOM_LEFT;
+    case NET_WM_MOVERESIZE_SIZE_LEFT:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_LEFT;
+    default:
+      return ZXDG_TOPLEVEL_V6_RESIZE_EDGE_NONE;
   }
 }
 
@@ -2109,7 +2156,7 @@ void sl_process_data_source_send_pending_list(struct sl_context* ctx) {
 
 static int sl_handle_selection_fd_writable(int fd, uint32_t mask, void* data) {
   struct sl_context* ctx = data;
-  uint8_t *value;
+  uint8_t* value;
   int bytes, bytes_left;
 
   value = xcb_get_property_value(ctx->selection_property_reply);
@@ -2195,7 +2242,7 @@ static const uint32_t sl_incr_chunk_size = 64 * 1024;
 static int sl_handle_selection_fd_readable(int fd, uint32_t mask, void* data) {
   struct sl_context* ctx = data;
   int bytes, offset, bytes_left;
-  void *p;
+  void* p;
 
   offset = ctx->selection_data.size;
   if (ctx->selection_data.size < sl_incr_chunk_size)
@@ -2507,8 +2554,8 @@ char* sl_copy_atom_name(xcb_get_atom_name_reply_t* reply) {
 
 static void sl_get_selection_targets(struct sl_context* ctx) {
   struct sl_data_source* data_source = NULL;
-  xcb_get_property_reply_t *reply;
-  xcb_atom_t *value;
+  xcb_get_property_reply_t* reply;
+  xcb_atom_t* value;
   uint32_t i;
 
   reply = xcb_get_property_reply(
@@ -2652,7 +2699,10 @@ static void sl_send_data(struct sl_context* ctx, xcb_atom_t data_type) {
   switch (ctx->data_driver) {
     case DATA_DRIVER_VIRTWL: {
       struct virtwl_ioctl_new new_pipe = {
-          .type = VIRTWL_IOCTL_NEW_PIPE_READ, .fd = -1, .flags = 0, .size = 0,
+          .type = VIRTWL_IOCTL_NEW_PIPE_READ,
+          .fd = -1,
+          .flags = 0,
+          .size = 0,
       };
 
       rv = ioctl(ctx->virtwl_fd, VIRTWL_IOCTL_NEW, &new_pipe);
@@ -2773,7 +2823,7 @@ static void sl_handle_xfixes_selection_notify(
 
 static int sl_handle_x_connection_event(int fd, uint32_t mask, void* data) {
   struct sl_context* ctx = (struct sl_context*)data;
-  xcb_generic_event_t *event;
+  xcb_generic_event_t* event;
   uint32_t count = 0;
 
   if ((mask & WL_EVENT_HANGUP) || (mask & WL_EVENT_ERROR))
@@ -2781,48 +2831,48 @@ static int sl_handle_x_connection_event(int fd, uint32_t mask, void* data) {
 
   while ((event = xcb_poll_for_event(ctx->connection))) {
     switch (event->response_type & ~SEND_EVENT_MASK) {
-    case XCB_CREATE_NOTIFY:
-      sl_handle_create_notify(ctx, (xcb_create_notify_event_t*)event);
-      break;
-    case XCB_DESTROY_NOTIFY:
-      sl_handle_destroy_notify(ctx, (xcb_destroy_notify_event_t*)event);
-      break;
-    case XCB_REPARENT_NOTIFY:
-      sl_handle_reparent_notify(ctx, (xcb_reparent_notify_event_t*)event);
-      break;
-    case XCB_MAP_REQUEST:
-      sl_handle_map_request(ctx, (xcb_map_request_event_t*)event);
-      break;
-    case XCB_MAP_NOTIFY:
-      sl_handle_map_notify(ctx, (xcb_map_notify_event_t*)event);
-      break;
-    case XCB_UNMAP_NOTIFY:
-      sl_handle_unmap_notify(ctx, (xcb_unmap_notify_event_t*)event);
-      break;
-    case XCB_CONFIGURE_REQUEST:
-      sl_handle_configure_request(ctx, (xcb_configure_request_event_t*)event);
-      break;
-    case XCB_CONFIGURE_NOTIFY:
-      sl_handle_configure_notify(ctx, (xcb_configure_notify_event_t*)event);
-      break;
-    case XCB_CLIENT_MESSAGE:
-      sl_handle_client_message(ctx, (xcb_client_message_event_t*)event);
-      break;
-    case XCB_FOCUS_IN:
-      sl_handle_focus_in(ctx, (xcb_focus_in_event_t*)event);
-      break;
-    case XCB_FOCUS_OUT:
-      sl_handle_focus_out(ctx, (xcb_focus_out_event_t*)event);
-      break;
-    case XCB_PROPERTY_NOTIFY:
-      sl_handle_property_notify(ctx, (xcb_property_notify_event_t*)event);
-      break;
-    case XCB_SELECTION_NOTIFY:
-      sl_handle_selection_notify(ctx, (xcb_selection_notify_event_t*)event);
-      break;
-    case XCB_SELECTION_REQUEST:
-      sl_handle_selection_request(ctx, (xcb_selection_request_event_t*)event);
-      break;
+      case XCB_CREATE_NOTIFY:
+        sl_handle_create_notify(ctx, (xcb_create_notify_event_t*)event);
+        break;
+      case XCB_DESTROY_NOTIFY:
+        sl_handle_destroy_notify(ctx, (xcb_destroy_notify_event_t*)event);
+        break;
+      case XCB_REPARENT_NOTIFY:
+        sl_handle_reparent_notify(ctx, (xcb_reparent_notify_event_t*)event);
+        break;
+      case XCB_MAP_REQUEST:
+        sl_handle_map_request(ctx, (xcb_map_request_event_t*)event);
+        break;
+      case XCB_MAP_NOTIFY:
+        sl_handle_map_notify(ctx, (xcb_map_notify_event_t*)event);
+        break;
+      case XCB_UNMAP_NOTIFY:
+        sl_handle_unmap_notify(ctx, (xcb_unmap_notify_event_t*)event);
+        break;
+      case XCB_CONFIGURE_REQUEST:
+        sl_handle_configure_request(ctx, (xcb_configure_request_event_t*)event);
+        break;
+      case XCB_CONFIGURE_NOTIFY:
+        sl_handle_configure_notify(ctx, (xcb_configure_notify_event_t*)event);
+        break;
+      case XCB_CLIENT_MESSAGE:
+        sl_handle_client_message(ctx, (xcb_client_message_event_t*)event);
+        break;
+      case XCB_FOCUS_IN:
+        sl_handle_focus_in(ctx, (xcb_focus_in_event_t*)event);
+        break;
+      case XCB_FOCUS_OUT:
+        sl_handle_focus_out(ctx, (xcb_focus_out_event_t*)event);
+        break;
+      case XCB_PROPERTY_NOTIFY:
+        sl_handle_property_notify(ctx, (xcb_property_notify_event_t*)event);
+        break;
+      case XCB_SELECTION_NOTIFY:
+        sl_handle_selection_notify(ctx, (xcb_selection_notify_event_t*)event);
+        break;
+      case XCB_SELECTION_REQUEST:
+        sl_handle_selection_request(ctx, (xcb_selection_request_event_t*)event);
+        break;
     }
 
     switch (event->response_type - ctx->xfixes_extension->first_event) {
@@ -2844,15 +2894,15 @@ static int sl_handle_x_connection_event(int fd, uint32_t mask, void* data) {
 
 static void sl_connect(struct sl_context* ctx) {
   const char wm_name[] = "Sommelier";
-  const xcb_setup_t *setup;
+  const xcb_setup_t* setup;
   xcb_screen_iterator_t screen_iterator;
   uint32_t values[1];
   xcb_void_cookie_t change_attributes_cookie, redirect_subwindows_cookie;
-  xcb_generic_error_t *error;
-  xcb_intern_atom_reply_t *atom_reply;
+  xcb_generic_error_t* error;
+  xcb_intern_atom_reply_t* atom_reply;
   xcb_depth_iterator_t depth_iterator;
-  xcb_xfixes_query_version_reply_t *xfixes_query_version_reply;
-  const xcb_query_extension_reply_t *composite_extension;
+  xcb_xfixes_query_version_reply_t* xfixes_query_version_reply;
+  const xcb_query_extension_reply_t* composite_extension;
   unsigned i;
 
   ctx->connection = xcb_connect_to_fd(ctx->wm_fd, NULL);
@@ -3168,8 +3218,8 @@ static void sl_client_destroy_notify(struct wl_listener* listener, void* data) {
 static int sl_handle_virtwl_ctx_event(int fd, uint32_t mask, void* data) {
   struct sl_context* ctx = (struct sl_context*)data;
   uint8_t ioctl_buffer[4096];
-  struct virtwl_ioctl_txn *ioctl_recv = (struct virtwl_ioctl_txn *)ioctl_buffer;
-  void *recv_data = ioctl_buffer + sizeof(struct virtwl_ioctl_txn);
+  struct virtwl_ioctl_txn* ioctl_recv = (struct virtwl_ioctl_txn*)ioctl_buffer;
+  void* recv_data = ioctl_buffer + sizeof(struct virtwl_ioctl_txn);
   size_t max_recv_size = sizeof(ioctl_buffer) - sizeof(struct virtwl_ioctl_txn);
   char fd_buffer[CMSG_LEN(sizeof(int) * VIRTWL_SEND_MAX_ALLOCS)];
   struct msghdr msg = {0};
@@ -3198,9 +3248,8 @@ static int sl_handle_virtwl_ctx_event(int fd, uint32_t mask, void* data) {
     if (ioctl_recv->fds[fd_count] < 0)
       break;
   }
-
   if (fd_count) {
-    struct cmsghdr *cmsg;
+    struct cmsghdr* cmsg;
 
     // Need to set msg_controllen so CMSG_FIRSTHDR will return the first
     // cmsghdr. We copy every fd we just received from the ioctl into this
@@ -3227,13 +3276,13 @@ static int sl_handle_virtwl_ctx_event(int fd, uint32_t mask, void* data) {
 static int sl_handle_virtwl_socket_event(int fd, uint32_t mask, void* data) {
   struct sl_context* ctx = (struct sl_context*)data;
   uint8_t ioctl_buffer[4096];
-  struct virtwl_ioctl_txn *ioctl_send = (struct virtwl_ioctl_txn *)ioctl_buffer;
-  void *send_data = ioctl_buffer + sizeof(struct virtwl_ioctl_txn);
+  struct virtwl_ioctl_txn* ioctl_send = (struct virtwl_ioctl_txn*)ioctl_buffer;
+  void* send_data = ioctl_buffer + sizeof(struct virtwl_ioctl_txn);
   size_t max_send_size = sizeof(ioctl_buffer) - sizeof(struct virtwl_ioctl_txn);
   char fd_buffer[CMSG_LEN(sizeof(int) * VIRTWL_SEND_MAX_ALLOCS)];
   struct iovec buffer_iov;
   struct msghdr msg = {0};
-  struct cmsghdr *cmsg;
+  struct cmsghdr* cmsg;
   ssize_t bytes;
   int fd_count = 0;
   int rv;
@@ -3289,7 +3338,7 @@ static int sl_handle_virtwl_socket_event(int fd, uint32_t mask, void* data) {
 // than |argc| arguments will be added to |argv|. Returns the total number of
 // argments found in |str|.
 static int sl_parse_cmd_prefix(char* str, int argc, char** argv) {
-  char *s = str;
+  char* s = str;
   int n = 0;
   int delim = 0;
 
@@ -3362,7 +3411,7 @@ static const char* sl_arg_value(const char* arg) {
   return s + 1;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   struct sl_context ctx = {
       .runprog = NULL,
       .display = NULL,
@@ -3463,28 +3512,28 @@ int main(int argc, char **argv) {
           },
       .visual_ids = {0},
       .colormaps = {0}};
-  const char *display = getenv("SOMMELIER_DISPLAY");
-  const char *scale = getenv("SOMMELIER_SCALE");
+  const char* display = getenv("SOMMELIER_DISPLAY");
+  const char* scale = getenv("SOMMELIER_SCALE");
   const char* dpi = getenv("SOMMELIER_DPI");
-  const char *clipboard_manager = getenv("SOMMELIER_CLIPBOARD_MANAGER");
-  const char *frame_color = getenv("SOMMELIER_FRAME_COLOR");
+  const char* clipboard_manager = getenv("SOMMELIER_CLIPBOARD_MANAGER");
+  const char* frame_color = getenv("SOMMELIER_FRAME_COLOR");
   const char* dark_frame_color = getenv("SOMMELIER_DARK_FRAME_COLOR");
-  const char *virtwl_device = getenv("SOMMELIER_VIRTWL_DEVICE");
-  const char *drm_device = getenv("SOMMELIER_DRM_DEVICE");
-  const char *glamor = getenv("SOMMELIER_GLAMOR");
-  const char *shm_driver = getenv("SOMMELIER_SHM_DRIVER");
-  const char *data_driver = getenv("SOMMELIER_DATA_DRIVER");
-  const char *peer_cmd_prefix = getenv("SOMMELIER_PEER_CMD_PREFIX");
-  const char *xwayland_cmd_prefix = getenv("SOMMELIER_XWAYLAND_CMD_PREFIX");
-  const char *accelerators = getenv("SOMMELIER_ACCELERATORS");
-  const char *xwayland_path = getenv("SOMMELIER_XWAYLAND_PATH");
-  const char *xwayland_gl_driver_path =
-    getenv("SOMMELIER_XWAYLAND_GL_DRIVER_PATH");
+  const char* virtwl_device = getenv("SOMMELIER_VIRTWL_DEVICE");
+  const char* drm_device = getenv("SOMMELIER_DRM_DEVICE");
+  const char* glamor = getenv("SOMMELIER_GLAMOR");
+  const char* shm_driver = getenv("SOMMELIER_SHM_DRIVER");
+  const char* data_driver = getenv("SOMMELIER_DATA_DRIVER");
+  const char* peer_cmd_prefix = getenv("SOMMELIER_PEER_CMD_PREFIX");
+  const char* xwayland_cmd_prefix = getenv("SOMMELIER_XWAYLAND_CMD_PREFIX");
+  const char* accelerators = getenv("SOMMELIER_ACCELERATORS");
+  const char* xwayland_path = getenv("SOMMELIER_XWAYLAND_PATH");
+  const char* xwayland_gl_driver_path =
+      getenv("SOMMELIER_XWAYLAND_GL_DRIVER_PATH");
   const char* xauth_path = getenv("SOMMELIER_XAUTH_PATH");
   const char* xfont_path = getenv("SOMMELIER_XFONT_PATH");
-  const char *socket_name = "wayland-0";
-  const char *runtime_dir;
-  struct wl_event_loop *event_loop;
+  const char* socket_name = "wayland-0";
+  const char* runtime_dir;
+  struct wl_event_loop* event_loop;
   struct wl_listener client_destroy_listener = {.notify =
                                                     sl_client_destroy_notify};
   int sv[2];
@@ -3497,7 +3546,7 @@ int main(int argc, char **argv) {
   int i;
 
   for (i = 1; i < argc; ++i) {
-    const char *arg = argv[i];
+    const char* arg = argv[i];
     if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0 ||
         strcmp(arg, "-?") == 0) {
       sl_print_usage();
@@ -3621,7 +3670,7 @@ int main(int argc, char **argv) {
     sock_fd = socket(PF_LOCAL, SOCK_STREAM, 0);
     assert(sock_fd >= 0);
 
-    rv = bind(sock_fd, (struct sockaddr *)&addr,
+    rv = bind(sock_fd, (struct sockaddr*)&addr,
               offsetof(struct sockaddr_un, sun_path) + strlen(addr.sun_path));
     assert(rv >= 0);
 
@@ -3656,7 +3705,7 @@ int main(int argc, char **argv) {
       struct ucred ucred;
       socklen_t length = sizeof(addr);
 
-      client_fd = accept(sock_fd, (struct sockaddr *)&addr, &length);
+      client_fd = accept(sock_fd, (struct sockaddr*)&addr, &length);
       if (client_fd < 0) {
         fprintf(stderr, "error: failed to accept: %m\n");
         continue;
@@ -3671,8 +3720,8 @@ int main(int argc, char **argv) {
       if (pid == 0) {
         char* client_fd_str;
         char* peer_pid_str;
-//        char* peer_cmd_prefix_str;
-        char *args[64];
+        //char* peer_cmd_prefix_str;
+        char* args[64];
         int i = 0, j;
 
         close(sock_fd);
@@ -3682,7 +3731,6 @@ int main(int argc, char **argv) {
           peer_cmd_prefix = PEER_CMD_PREFIX;
 
         /*
-        fprintf(stderr, "peer_cmd_prefix = '%s'\n", peer_cmd_prefix);
         if (peer_cmd_prefix) {
           peer_cmd_prefix_str = sl_xasprintf("%s", peer_cmd_prefix);
 
@@ -3692,8 +3740,8 @@ int main(int argc, char **argv) {
             i = 0;
           }
         }
-
         */
+
         args[i++] = argv[0];
         peer_pid_str = sl_xasprintf("--peer-pid=%d", ucred.pid);
         args[i++] = peer_pid_str;
@@ -3702,7 +3750,7 @@ int main(int argc, char **argv) {
 
         // forward some flags.
         for (j = 1; j < argc; ++j) {
-          char *arg = argv[j];
+          char* arg = argv[j];
           if (strstr(arg, "--display") == arg ||
               strstr(arg, "--scale") == arg ||
               strstr(arg, "--accelerators") == arg ||
@@ -3778,7 +3826,10 @@ int main(int argc, char **argv) {
 
   if (virtwl_device) {
     struct virtwl_ioctl_new new_ctx = {
-        .type = VIRTWL_IOCTL_NEW_CTX, .fd = -1, .flags = 0, .size = 0,
+        .type = VIRTWL_IOCTL_NEW_CTX,
+        .fd = -1,
+        .flags = 0,
+        .size = 0,
     };
 
     ctx.virtwl_fd = open(virtwl_device, O_RDWR);
@@ -3808,7 +3859,6 @@ int main(int argc, char **argv) {
                 strerror(errno));
         return EXIT_FAILURE;
       }
-      //fprintf(stderr, "ioctl(%d, VIRTWL_IOCTL_NEW_CTX) -> %d\n",  ctx.virtwl_fd, new_ctx.fd); 
 
       ctx.virtwl_ctx_fd = new_ctx.fd;
 
@@ -3864,7 +3914,9 @@ int main(int argc, char **argv) {
             .flags = 0,
             .dmabuf =
                 {
-                    .width = 0, .height = 0, .format = 0,
+                    .width = 0,
+                    .height = 0,
+                    .format = 0,
                 },
         };
         if (ioctl(ctx.virtwl_fd, VIRTWL_IOCTL_NEW, &new_dmabuf) == -1 &&
@@ -3984,8 +4036,8 @@ int main(int argc, char **argv) {
         }
       } else {
         struct sl_accelerator* accelerator;
-        const char *end = strchrnul(accelerators, ',');
-        char *name = strndup(accelerators, end - accelerators);
+        const char* end = strchrnul(accelerators, ',');
+        char* name = strndup(accelerators, end - accelerators);
 
         accelerator = malloc(sizeof(*accelerator));
         accelerator->modifiers = modifiers;
@@ -4054,7 +4106,7 @@ int main(int argc, char **argv) {
         char* display_fd_str;
         char* wm_fd_str;
         char* xwayland_cmd_prefix_str;
-        char *args[64];
+        char* args[64];
         int i = 0;
         int fd;
 

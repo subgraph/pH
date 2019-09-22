@@ -41,6 +41,7 @@ struct sl_linux_dmabuf;
 struct sl_keyboard_extension;
 struct sl_text_input_manager;
 struct sl_relative_pointer_manager;
+struct sl_pointer_constraints;
 struct sl_window;
 struct zaura_shell;
 struct zcr_keyboard_extension_v1;
@@ -105,6 +106,7 @@ struct sl_context {
   struct sl_keyboard_extension* keyboard_extension;
   struct sl_text_input_manager* text_input_manager;
   struct sl_relative_pointer_manager* relative_pointer_manager;
+  struct sl_pointer_constraints* pointer_constraints;
   struct wl_list outputs;
   struct wl_list seats;
   struct wl_event_source* display_event_source;
@@ -248,6 +250,12 @@ struct sl_host_surface {
   struct wl_list busy_buffers;
 };
 
+struct sl_host_region {
+  struct sl_context* ctx;
+  struct wl_resource* resource;
+  struct wl_region* proxy;
+};
+
 struct sl_host_buffer {
   struct wl_resource* resource;
   struct wl_buffer* proxy;
@@ -351,6 +359,13 @@ struct sl_text_input_manager {
   struct zwp_text_input_manager_v1* internal;
 };
 
+struct sl_pointer_constraints {
+  struct sl_context* ctx;
+  uint32_t id;
+  struct sl_global* host_global;
+  struct zwp_pointer_constraints_v1* internal;
+};
+
 struct sl_viewporter {
   struct sl_context* ctx;
   uint32_t id;
@@ -414,7 +429,7 @@ struct sl_mmap {
   struct wl_resource* buffer_resource;
 };
 
-typedef void (*sl_sync_func_t)(struct sl_context *ctx,
+typedef void (*sl_sync_func_t)(struct sl_context* ctx,
                                struct sl_sync_point* sync_point);
 
 struct sl_sync_point {
@@ -445,6 +460,7 @@ struct sl_window {
   int managed;
   int realized;
   int activated;
+  int maximized;
   int allow_resize;
   xcb_window_t transient_for;
   xcb_window_t client_leader;
@@ -513,6 +529,8 @@ struct sl_global* sl_gtk_shell_global_create(struct sl_context* ctx);
 struct sl_global* sl_drm_global_create(struct sl_context* ctx);
 
 struct sl_global* sl_text_input_manager_global_create(struct sl_context* ctx);
+
+struct sl_global* sl_pointer_constraints_global_create(struct sl_context* ctx);
 
 void sl_set_display_implementation(struct sl_context* ctx);
 

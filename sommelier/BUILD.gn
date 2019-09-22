@@ -13,12 +13,12 @@ group("all") {
 }
 
 if (!defined(peer_cmd_prefix)) {
-#  if (use.amd64) {
+  if (use.amd64) {
     peer_cmd_prefix = "\"/opt/google/cros-containers/lib/ld-linux-x86-64.so.2 --library-path /opt/google/cros-containers/lib --inhibit-rpath \\\"\\\"\""
-#  }
-#  if (use.arm) {
-#    peer_cmd_prefix = "\"/opt/google/cros-containers/lib/ld-linux-armhf.so.3 --library-path /opt/google/cros-containers/lib --inhibit-rpath \\\"\\\"\""
-#  }
+  }
+  if (use.arm) {
+    peer_cmd_prefix = "\"/opt/google/cros-containers/lib/ld-linux-armhf.so.3 --library-path /opt/google/cros-containers/lib --inhibit-rpath \\\"\\\"\""
+  }
 }
 
 # Set this to the Xwayland path.
@@ -64,6 +64,7 @@ wayland_protocol_library("sommelier-protocol") {
     "protocol/gtk-shell.xml",
     "protocol/keyboard-extension-unstable-v1.xml",
     "protocol/linux-dmabuf-unstable-v1.xml",
+    "protocol/pointer-constraints-unstable-v1.xml",
     "protocol/relative-pointer-unstable-v1.xml",
     "protocol/text-input-unstable-v1.xml",
     "protocol/viewporter.xml",
@@ -97,6 +98,7 @@ executable("sommelier") {
     "sommelier-drm.c",
     "sommelier-gtk-shell.c",
     "sommelier-output.c",
+    "sommelier-pointer-constraints.c",
     "sommelier-relative-pointer-manager.c",
     "sommelier-seat.c",
     "sommelier-shell.c",

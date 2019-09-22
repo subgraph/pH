@@ -290,7 +290,7 @@ static void sl_xdg_toplevel_set_fullscreen(
     struct wl_resource* output_resource) {
   struct sl_host_xdg_toplevel* host = wl_resource_get_user_data(resource);
   struct sl_host_output* host_output =
-      output_resource ? wl_resource_get_user_data(resource) : NULL;
+      output_resource ? wl_resource_get_user_data(output_resource) : NULL;
 
   zxdg_toplevel_v6_set_fullscreen(host->proxy,
                                   host_output ? host_output->proxy : NULL);

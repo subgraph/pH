@@ -33,12 +33,6 @@
 #define DMA_BUF_BASE 'b'
 #define DMA_BUF_IOCTL_SYNC _IOW(DMA_BUF_BASE, 0, struct dma_buf_sync)
 
-struct sl_host_region {
-  struct sl_context* ctx;
-  struct wl_resource* resource;
-  struct wl_region* proxy;
-};
-
 struct sl_host_compositor {
   struct sl_compositor* compositor;
   struct wl_resource* resource;

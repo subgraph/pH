@@ -6,7 +6,7 @@ PREFIX = /usr
 SYSCONFDIR = /etc
 BINDIR = $(PREFIX)/bin
 SRCFILES := sommelier.c version.h
-XMLFILES := protocol/aura-shell.xml protocol/viewporter.xml protocol/xdg-shell-unstable-v6.xml protocol/linux-dmabuf-unstable-v1.xml protocol/drm.xml protocol/keyboard-extension-unstable-v1.xml protocol/gtk-shell.xml protocol/relative-pointer-unstable-v1.xml protocol/text-input-unstable-v1.xml
+XMLFILES := protocol/aura-shell.xml protocol/viewporter.xml protocol/xdg-shell-unstable-v6.xml protocol/linux-dmabuf-unstable-v1.xml protocol/drm.xml protocol/keyboard-extension-unstable-v1.xml protocol/gtk-shell.xml protocol/relative-pointer-unstable-v1.xml protocol/text-input-unstable-v1.xml protocol/pointer-constraints-unstable-v1.xml
 AUXFILES := Makefile README LICENSE AUTHORS sommelier@.service.in sommelier-x@.service.in sommelierrc sommelier.sh
 ALLFILES := $(SRCFILES) $(XMLFILES) $(AUXFILES)
 #GIT_VERSION := $(shell git describe --abbrev=4 --dirty --always --tags)
@@ -17,8 +17,8 @@ DIST_VERSION_MINOR := $(word 2,$(DIST_VERSION_BITS))
 DIST_VERSION_MINOR_NEXT := $(shell expr $(DIST_VERSION_MINOR) + 1)
 CFLAGS=-g -Wall `pkg-config --cflags libdrm xcb xcb-composite xcb-xfixes wayland-server wayland-client gbm pixman-1` -I. -D_GNU_SOURCE=1 -DWL_HIDE_DEPRECATED=1 -DXWAYLAND_PATH=\"$(PREFIX)/bin/Xwayland\"
 LDFLAGS=-lpthread -lm `pkg-config --libs libdrm xcb xcb-composite xcb-xfixes wayland-server wayland-client gbm pixman-1 xkbcommon`
-DEPS = xdg-shell-unstable-v6-client-protocol.h xdg-shell-unstable-v6-server-protocol.h aura-shell-client-protocol.h viewporter-client-protocol.h viewporter-server-protocol.h linux-dmabuf-unstable-v1-client-protocol.h drm-server-protocol.h keyboard-extension-unstable-v1-client-protocol.h gtk-shell-server-protocol.h relative-pointer-unstable-v1-server-protocol.h relative-pointer-unstable-v1-client-protocol.h text-input-unstable-v1-client-protocol.h text-input-unstable-v1-server-protocol.h
-OBJECTS = sommelier.o sommelier-compositor.o sommelier-data-device-manager.o sommelier-display.o sommelier-drm.o sommelier-gtk-shell.o sommelier-output.o sommelier-relative-pointer-manager.o sommelier-seat.o sommelier-shell.o sommelier-shm.o sommelier-subcompositor.o sommelier-text-input.o sommelier-viewporter.o sommelier-xdg-shell.o xdg-shell-unstable-v6-protocol.o aura-shell-protocol.o viewporter-protocol.o linux-dmabuf-unstable-v1-protocol.o drm-protocol.o keyboard-extension-unstable-v1-protocol.o gtk-shell-protocol.o relative-pointer-unstable-v1-protocol.o text-input-unstable-v1-protocol.o
+DEPS = xdg-shell-unstable-v6-client-protocol.h xdg-shell-unstable-v6-server-protocol.h aura-shell-client-protocol.h viewporter-client-protocol.h viewporter-server-protocol.h linux-dmabuf-unstable-v1-client-protocol.h drm-server-protocol.h keyboard-extension-unstable-v1-client-protocol.h gtk-shell-server-protocol.h relative-pointer-unstable-v1-server-protocol.h relative-pointer-unstable-v1-client-protocol.h text-input-unstable-v1-client-protocol.h text-input-unstable-v1-server-protocol.h pointer-constraints-unstable-v1-client-protocol.h pointer-constraints-unstable-v1-server-protocol.h
+OBJECTS = sommelier.o sommelier-compositor.o sommelier-data-device-manager.o sommelier-display.o sommelier-drm.o sommelier-gtk-shell.o sommelier-output.o sommelier-relative-pointer-manager.o sommelier-seat.o sommelier-shell.o sommelier-shm.o sommelier-subcompositor.o sommelier-text-input.o sommelier-viewporter.o sommelier-xdg-shell.o sommelier-pointer-constraints.o xdg-shell-unstable-v6-protocol.o aura-shell-protocol.o viewporter-protocol.o linux-dmabuf-unstable-v1-protocol.o drm-protocol.o keyboard-extension-unstable-v1-protocol.o gtk-shell-protocol.o relative-pointer-unstable-v1-protocol.o text-input-unstable-v1-protocol.o pointer-constraints-unstable-v1-protocol.o
 
 #all: sommelier sommelier@.service sommelier-x@.service
 all: sommelier
