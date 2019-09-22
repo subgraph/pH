@@ -15,7 +15,7 @@ pub fn mount_tmpfs(target: &str) -> Result<()> {
 
 pub fn mount_tmpdir(target: &str) -> Result<()> {
     mount("tmpfs", target, "tmpfs",
-          libc::MS_NOSUID|libc::MS_NODEV,
+          libc::MS_NOSUID|libc::MS_NODEV|libc::MS_NOEXEC,
           Some("mode=1777"))
         .map_err(|e| Error::MountTmpFS(target.to_string(), e))
 }
@@ -86,6 +86,12 @@ pub fn create_directories<P: AsRef<Path>>(directories: &[P]) -> Result<()> {
         mkdir(dir)?;
     }
     Ok(())
+}
+
+pub fn umask(mode: u32) {
+    unsafe {
+        libc::umask(mode);
+    }
 }
 
 pub fn mkdir<P: AsRef<Path>>(path: P) -> Result<()> {
@@ -217,11 +223,14 @@ pub fn chmod(path: &str, mode: u32) -> Result<()> {
 }
 
 pub fn chown(path: &str, uid: u32, gid: u32) -> Result<()> {
+    _chown(path, uid, gid).map_err(Error::ChmodFailed)
+}
+
+pub fn _chown(path: &str, uid: u32, gid: u32) -> io::Result<()> {
     let path = cstr(path);
     unsafe {
         if libc::chown(path.as_ptr(), uid, gid) == -1 {
-            let last = io::Error::last_os_error();
-            return Err(Error::ChmodFailed(last));
+            return Err(io::Error::last_os_error());
         }
     }
     Ok(())

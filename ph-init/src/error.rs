@@ -30,6 +30,7 @@ pub enum Error {
     LaunchFailed(String, io::Error),
     RebootFailed(io::Error),
     OpenLogFailed(io::Error),
+    XAuthFail(io::Error),
 }
 
 impl fmt::Display for Error {
@@ -65,6 +66,7 @@ impl fmt::Display for Error {
             LaunchFailed(exec, err) => write!(f, "unable to execute {}: {}", exec, err),
             RebootFailed(err) => write!(f, "could not reboot system: {}", err),
             OpenLogFailed(err) => write!(f, "failed to open log file: {}", err),
+            XAuthFail(err) => write!(f, "error creating .Xauthority file: {}", err),
         }
     }
 }

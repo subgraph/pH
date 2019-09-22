@@ -1,11 +1,12 @@
 
 use crate::{Error, Result, Logger, LogLevel};
 use crate::cmdline::CmdLine;
-use crate::sys::{sethostname, setsid, set_controlling_tty, mount_devtmpfs, mount_tmpfs, mkdir, umount, mount_sysfs, mount_procfs, mount_devpts, chown, chmod, create_directories, mount_overlay, move_mount, pivot_root, mount_9p, mount, waitpid, reboot, getpid, mount_tmpdir, mount_cgroup, mkdir_mode};
+use crate::sys::{sethostname, setsid, set_controlling_tty, mount_devtmpfs, mount_tmpfs, mkdir, umount, mount_sysfs, mount_procfs, mount_devpts, chown, chmod, create_directories, mount_overlay, move_mount, pivot_root, mount_9p, mount, waitpid, reboot, getpid, mount_tmpdir, mount_cgroup, mkdir_mode, umask, _chown};
 use std::path::Path;
 use std::{fs, process, io, env};
 use crate::service::{Service, ServiceLaunch};
 use std::collections::BTreeMap;
+use std::io::Read;
 
 pub struct InitServer {
     hostname: String,
@@ -38,6 +39,7 @@ impl InitServer {
 
     fn initialize(&self) -> Result<()> {
         self.set_loglevel();
+        umask(0);
         sethostname(&self.hostname)?;
         setsid()?;
         set_controlling_tty(0, true)?;
@@ -161,6 +163,12 @@ impl InitServer {
         let dbus = ServiceLaunch::new("dbus-daemon", "/usr/bin/dbus-daemon")
             .base_environment()
             .uidgid(1000,1000)
+            .env("HOME", "/home/user")
+            .env("NO_AT_BRIDGE", "1")
+            .env("QT_ACCESSIBILITY", "1")
+            .env("SHELL", "/bin/bash")
+            .env("USER", "user")
+            .env("WAYLAND_DISPLAY", "wayland-0")
             .arg("--session")
             .arg("--nosyslog")
             .arg("--address=unix:path=/run/user/1000/bus")
@@ -179,6 +187,51 @@ impl InitServer {
 
         self.services.insert(sommelier.pid(), sommelier);
 
+        Self::write_xauth().map_err(Error::XAuthFail)?;
+
+        let sommelierx = ServiceLaunch::new("sommelier-x", "/opt/ph/usr/bin/sommelier")
+            .base_environment()
+            .uidgid(1000,1000)
+            .arg("-X")
+            .arg("--x-display=0")
+            .arg("--no-exit-with-child")
+            .arg("--x-auth=/home/user/.Xauthority")
+            .arg("/bin/true")
+            .pipe_output()
+            .launch()?;
+
+
+        self.services.insert(sommelierx.pid(), sommelierx);
+
+        Ok(())
+    }
+
+    fn write_xauth() -> io::Result<()> {
+        let xauth_path = "/home/user/.Xauthority";
+
+        let mut randbuf = [0; 16];
+        let mut file = fs::File::open("/dev/urandom")?;
+        file.read_exact(&mut randbuf)?;
+
+        let mut v: Vec<u8> = Vec::new();
+
+        // ???
+        v.extend_from_slice(&[0x01, 0x00]);
+        // "airwolf".len()
+        v.extend_from_slice(&[0x00, 0x07]);
+        v.extend_from_slice(b"airwolf");
+        // "0".len() (DISPLAY=:0)
+        v.extend_from_slice(&[0x00, 0x01]);
+        v.extend_from_slice(b"0");
+       // "MIT-MAGIC-COOKIE-a".len()
+        v.extend_from_slice(&[0x00, 0x12]);
+        v.extend_from_slice(b"MIT-MAGIC-COOKIE-1");
+        // randbuf.len()
+        v.extend_from_slice(&[0x00, 0x10]);
+        v.extend_from_slice(&randbuf);
+
+        fs::write("/home/user/.Xauthority", v)?;
+        _chown(xauth_path, 1000, 1000)?;
         Ok(())
     }
 
@@ -189,6 +242,7 @@ impl InitServer {
 
         let shell = ServiceLaunch::new_shell(root, home, realm)
             .launch_with_preexec(move || {
+//                set_controlling_tty(0, true)?;
                 env::set_current_dir(home)?;
                 println!("{}", splash);
                 Ok(())
