@@ -1,29 +1,30 @@
-extern crate libc;
+#[macro_use]
+extern crate lazy_static;
 
+#[macro_use]
+mod log;
 mod error;
 mod cmdline;
-mod setup;
+mod service;
+mod init;
 mod sys;
 
-use crate::setup::Setup;
-
 pub use error::{Error,Result};
+pub use log::{Logger,LogLevel};
+use crate::init::InitServer;
 
 fn run_init() -> Result<()> {
-    Setup::check_pid1()?;
-    let setup = Setup::create("airwolf")?;
-    setup.set_splash(SPLASH);
-    setup.setup_rootfs()?;
-    setup.mount_home_if_exists()?;
-    let _child = setup.launch_sommelier();
-    let _dbus = setup.launch_dbus();
-    setup.launch_shell()?;
+    let mut server = InitServer::create("airwolf")?;
+    server.setup_filesystem()?;
+    server.run_daemons()?;
+    server.launch_console_shell(SPLASH)?;
+    server.run()?;
     Ok(())
 }
 
 fn main() {
     if let Err(err) = run_init() {
-        println!("ph-init error: {}", err);
+        warn!("ph-init error: {}", err);
     }
 }
 

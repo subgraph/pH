@@ -7,6 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::cell::RefCell;
 use std::os::unix::process::CommandExt;
 
+
 pub struct Setup {
     hostname: String,
     cmdline: CmdLine,
@@ -130,9 +131,9 @@ impl Setup {
         process::exit(-1);
     }
 
-    fn wait_for_child(&self) -> i32 {
+    fn wait_for_child(&self) -> u32 {
         match waitpid(-1, 0) {
-            Ok(pid) => pid,
+            Ok((pid,_status)) => pid as u32,
             Err(err) => Self::handle_waitpid_err(err)
         }
     }
@@ -246,8 +247,14 @@ impl Setup {
 
         let _child = self.run_shell(as_root)
             .map_err(Error::RunShell)?;
+        let shell_pid = _child.id();
         loop {
-            let _ = self.wait_for_child();
+            if self.wait_for_child() == shell_pid {
+                if let Err(err) = reboot(libc::RB_AUTOBOOT) {
+                    println!("reboot() failed: {:?}", err);
+                    process::exit(-1);
+                }
+            }
         }
     }
 }

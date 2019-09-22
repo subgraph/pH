@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 libc = "*"
+lazy_static="1.4.0"

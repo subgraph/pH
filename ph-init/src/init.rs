@@ -1,9 +1,9 @@
 
-use crate::{Error,Result};
+use crate::{Error, Result, Logger, LogLevel};
 use crate::cmdline::CmdLine;
-use crate::sys::{sethostname, setsid, set_controlling_tty, mount_devtmpfs, mount_tmpfs, mkdir, umount, mount_sysfs, mount_procfs, mount_devpts, chown, chmod, create_directories, mount_overlay, move_mount, pivot_root, mount_9p, mount, waitpid, reboot, getpid};
+use crate::sys::{sethostname, setsid, set_controlling_tty, mount_devtmpfs, mount_tmpfs, mkdir, umount, mount_sysfs, mount_procfs, mount_devpts, chown, chmod, create_directories, mount_overlay, move_mount, pivot_root, mount_9p, mount, waitpid, reboot, getpid, mount_tmpdir, mount_cgroup, mkdir_mode};
 use std::path::Path;
-use std::{fs, process, io};
+use std::{fs, process, io, env};
 use crate::service::{Service, ServiceLaunch};
 use std::collections::BTreeMap;
 
@@ -15,12 +15,8 @@ pub struct InitServer {
 }
 
 impl InitServer {
-    pub fn create(hostname: &str) -> Result<InitServer> {
+    fn new(hostname: &str) -> Result<InitServer> {
         Self::check_pid1()?;
-        sethostname(hostname)?;
-        setsid()?;
-        set_controlling_tty(0, true)?;
-
         let hostname = hostname.to_string();
         let cmdline = CmdLine::load()?;
         let rootfs = RootFS::load(&cmdline)?;
@@ -34,11 +30,35 @@ impl InitServer {
         })
     }
 
+    pub fn create(hostname: &str) -> Result<InitServer> {
+        let init = Self::new(hostname)?;
+        init.initialize()?;
+        Ok(init)
+    }
+
+    fn initialize(&self) -> Result<()> {
+        self.set_loglevel();
+        sethostname(&self.hostname)?;
+        setsid()?;
+        set_controlling_tty(0, true)?;
+        Ok(())
+    }
+
     fn check_pid1() -> Result<()> {
         if getpid() == 1 {
             Ok(())
         } else {
             Err(Error::Pid1)
+        }
+    }
+
+    pub fn set_loglevel(&self) {
+        if self.cmdline.has_var("phinit.verbose") {
+            Logger::set_log_level(LogLevel::Verbose);
+        } else if self.cmdline.has_var("phinit.debug") {
+            Logger::set_log_level(LogLevel::Debug);
+        } else {
+            Logger::set_log_level(LogLevel::Info);
         }
     }
 
@@ -56,17 +76,25 @@ impl InitServer {
         umount("/opt/ph/dev")?;
 
         mount_sysfs()?;
+        mount_cgroup()?;
         mount_procfs()?;
         mount_devtmpfs()?;
         mount_devpts()?;
         mount_tmpfs("/run")?;
+        mount_tmpdir("/tmp")?;
+        mkdir("/dev/shm")?;
+        mount_tmpdir("/dev/shm")?;
         mkdir("/run/user")?;
         mkdir("/run/user/1000")?;
         chown("/run/user/1000", 1000,1000)?;
+
         if Path::new("/dev/wl0").exists() {
             chmod("/dev/wl0", 0o666)?;
+            mkdir_mode("/tmp/.X11-unix", 0o1777)?;
         }
         self.mount_home_if_exists()?;
+        Logger::set_file_output("/run/phinit.log")
+            .map_err(Error::OpenLogFailed)?;
         Ok(())
     }
 
@@ -136,6 +164,8 @@ impl InitServer {
             .arg("--session")
             .arg("--nosyslog")
             .arg("--address=unix:path=/run/user/1000/bus")
+            .arg("--print-address")
+            .pipe_output()
             .launch()?;
 
         self.services.insert(dbus.pid(), dbus);
@@ -144,6 +174,7 @@ impl InitServer {
             .base_environment()
             .uidgid(1000,1000)
             .arg("--master")
+            .pipe_output()
             .launch()?;
 
         self.services.insert(sommelier.pid(), sommelier);
@@ -154,29 +185,32 @@ impl InitServer {
     pub fn launch_console_shell(&mut self, splash: &'static str) -> Result<()> {
         let root = self.cmdline.has_var("phinit.rootshell");
         let realm = self.cmdline.lookup("phinit.realm");
+        let home = if root { "/" } else { "/home/user" };
 
-        let shell = ServiceLaunch::new_shell(root, realm)
+        let shell = ServiceLaunch::new_shell(root, home, realm)
             .launch_with_preexec(move || {
+                env::set_current_dir(home)?;
                 println!("{}", splash);
                 Ok(())
             })?;
-
         self.services.insert(shell.pid(), shell);
+        Ok(())
+    }
 
+    fn wait_for_next_child(&mut self) -> Result<()> {
+        if let Some(child) = self.wait_for_child() {
+            info!("Service exited: {}", child.name());
+            if child.name() == "shell" {
+                reboot(libc::RB_AUTOBOOT)
+                    .map_err(Error::RebootFailed)?;
+            }
+        }
         Ok(())
     }
 
     pub fn run(&mut self) -> Result<()> {
         loop {
-            if let Some(child) = self.wait_for_child() {
-                println!("Service exited: {}", child.name());
-                if child.name() == "shell" {
-                    reboot(libc::RB_AUTOBOOT)
-                        .map_err(Error::RebootFailed)?;
-                }
-            } else {
-                println!("Unknown process exited.");
-            }
+            self.wait_for_next_child()?;
         }
     }
 
@@ -184,12 +218,12 @@ impl InitServer {
         if let Some(errno) = err.raw_os_error() {
             if errno == libc::ECHILD {
                 if let Err(err) = reboot(libc::RB_AUTOBOOT) {
-                    println!("reboot() failed: {:?}", err);
+                    warn!("reboot() failed: {:?}", err);
                     process::exit(-1);
                 }
             }
         }
-        println!("error on waitpid: {:?}", err);
+        warn!("error on waitpid: {:?}", err);
         process::exit(-1);
     }
 

@@ -13,18 +13,38 @@ pub fn mount_tmpfs(target: &str) -> Result<()> {
         .map_err(|e| Error::MountTmpFS(target.to_string(), e))
 }
 
+pub fn mount_tmpdir(target: &str) -> Result<()> {
+    mount("tmpfs", target, "tmpfs",
+          libc::MS_NOSUID|libc::MS_NODEV,
+          Some("mode=1777"))
+        .map_err(|e| Error::MountTmpFS(target.to_string(), e))
+}
+
 pub fn mount_procfs() -> Result<()> {
-    mount("proc", "/proc", "proc", 0, None)
+    mount("proc", "/proc", "proc",
+          libc::MS_NOATIME|libc::MS_NOSUID|libc::MS_NODEV|libc::MS_NOEXEC,
+          None)
         .map_err(Error::MountProcFS)
 }
 
 pub fn mount_sysfs() -> Result<()> {
-    mount("sysfs", "/sys", "sysfs", 0, None)
+    mount("sysfs", "/sys", "sysfs",
+          libc::MS_NOATIME|libc::MS_NOSUID|libc::MS_NODEV|libc::MS_NOEXEC,
+          None)
         .map_err(Error::MountSysFS)
 }
 
+pub fn mount_cgroup() -> Result<()> {
+    mount("cgroup", "/sys/fs/cgroup", "cgroup",
+          libc::MS_NOSUID|libc::MS_NODEV|libc::MS_NOEXEC,
+          None)
+        .map_err(Error::MountCGroup)
+}
+
 pub fn mount_devtmpfs() -> Result<()> {
-    mount("devtmpfs", "/dev", "devtmpfs", 0, None)
+    mount("devtmpfs", "/dev", "devtmpfs",
+          libc::MS_NOSUID|libc::MS_NOEXEC,
+          None)
         .map_err(Error::MountDevTmpFS)
 }
 
@@ -33,7 +53,9 @@ pub fn mount_devpts() -> Result<()> {
     if !Path::new(target).exists() {
         mkdir(target)?;
     }
-    mount("devpts", target, "devpts", 0, None)
+    mount("devpts", target, "devpts",
+          libc::MS_NOSUID|libc::MS_NOEXEC,
+          Some("mode=620"))
         .map_err(Error::MountDevPts)
 }
 
@@ -49,7 +71,9 @@ pub fn move_mount(source: &str, target: &str) -> Result<()> {
 
 pub fn mount_9p(name: &str, target: &str) -> Result<()> {
     const MS_LAZYTIME: libc::c_ulong = (1 << 25);
-    mount(name, target, "9p", libc::MS_NOATIME|MS_LAZYTIME, Some("trans=virtio,cache=loose"))
+    mount(name, target, "9p",
+          libc::MS_NOATIME|MS_LAZYTIME,
+          Some("trans=virtio,cache=loose"))
         .map_err(|e| Error::Mount9P(name.to_string(), target.to_string(), e))
 }
 
@@ -63,12 +87,17 @@ pub fn create_directories<P: AsRef<Path>>(directories: &[P]) -> Result<()> {
     }
     Ok(())
 }
+
 pub fn mkdir<P: AsRef<Path>>(path: P) -> Result<()> {
+    mkdir_mode(path, 0o755)
+}
+
+pub fn mkdir_mode<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
     let path = path.as_ref();
     let path_cstr = CString::new(path.as_os_str().as_bytes()).map_err(|_| Error::CStringConv)?;
 
     unsafe {
-        if libc::mkdir(path_cstr.as_ptr(), 0o755) == -1 {
+        if libc::mkdir(path_cstr.as_ptr(), mode) == -1 {
             return Err(Error::MkDir(path.display().to_string(), io::Error::last_os_error()))
         }
     }
@@ -88,11 +117,14 @@ pub fn sethostname<S: AsRef<OsStr>>(name: S) -> Result<()> {
 }
 
 pub fn setsid() -> Result<u32> {
+    _setsid().map_err(Error::SetSid)
+}
+
+pub fn _setsid() -> io::Result<u32> {
     unsafe {
         let res = libc::setsid();
         if res == -1 {
-            let last = io::Error::last_os_error();
-            return Err(Error::SetSid(last))
+            return Err(io::Error::last_os_error())
         }
         Ok(res as u32)
     }
@@ -157,14 +189,15 @@ pub fn set_controlling_tty(fd: libc::c_int, force: bool) -> Result<()> {
     }
 }
 
-pub fn waitpid(pid: libc::pid_t, options: libc::c_int) -> io::Result<i32> {
+pub fn waitpid(pid: libc::pid_t, options: libc::c_int) -> io::Result<(i32,i32)> {
     let mut status = 0 as libc::c_int;
     unsafe {
-        if libc::waitpid(pid, &mut status, options) == -1 {
+        let ret = libc::waitpid(pid, &mut status, options);
+        if ret == -1 {
             return Err(io::Error::last_os_error())
         }
+        Ok((ret, status))
     }
-    Ok(status)
 }
 
 pub fn getpid() -> i32 {

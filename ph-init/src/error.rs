@@ -9,6 +9,7 @@ pub enum Error {
     MountProcFS(io::Error),
     MountTmpFS(String, io::Error),
     MountSysFS(io::Error),
+    MountCGroup(io::Error),
     MountDevTmpFS(io::Error),
     MountDevPts(io::Error),
     MountOverlay(io::Error),
@@ -26,6 +27,9 @@ pub enum Error {
     CStringConv,
     ChmodFailed(io::Error),
     ChownFailed(io::Error),
+    LaunchFailed(String, io::Error),
+    RebootFailed(io::Error),
+    OpenLogFailed(io::Error),
 }
 
 impl fmt::Display for Error {
@@ -40,6 +44,7 @@ impl fmt::Display for Error {
             MountProcFS(err) => write!(f, "unable to mount procfs: {}", err),
             MountTmpFS(target,err) => write!(f, "failed to mount tmpfs at {}: {}", target, err),
             MountSysFS(err) => write!(f, "failed to mount sysfs at /sys: {}", err),
+            MountCGroup(err) => write!(f, "failed to mount cgroup at /sys/fs/cgroup: {}", err),
             MountDevTmpFS(err) => write!(f, "failed to mount devtmpfs at /dev: {}", err),
             MountDevPts(err) => write!(f, "failed to mount /dev/pts: {}", err),
             MountOverlay(err) => write!(f, "failed to mount overlayfs: {}", err),
@@ -57,6 +62,9 @@ impl fmt::Display for Error {
             CStringConv => write!(f, "failed to create CString"),
             ChmodFailed(err) => write!(f, "failed to chmod: {}", err),
             ChownFailed(err) => write!(f, "failed to chown: {}", err),
+            LaunchFailed(exec, err) => write!(f, "unable to execute {}: {}", exec, err),
+            RebootFailed(err) => write!(f, "could not reboot system: {}", err),
+            OpenLogFailed(err) => write!(f, "failed to open log file: {}", err),
         }
     }
 }
