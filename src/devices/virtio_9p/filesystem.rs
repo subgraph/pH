@@ -91,23 +91,6 @@ impl FileSystem {
     fn metadata(&self, path: &Path) -> io::Result<Metadata> {
         path.symlink_metadata()
     }
-
-    fn canonicalize_parent(&self, path: &Path) -> io::Result<PathBuf> {
-        let parent = path.parent()
-            .ok_or(io::Error::from_raw_os_error(libc::ENOENT))?;
-        let parent = self.canonicalize(parent)?;
-        let filename = path.file_name()
-            .ok_or(io::Error::from_raw_os_error(libc::ENOENT))?;
-        Ok(parent.join(filename))
-    }
-
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        let canon = path.canonicalize()?;
-        if !canon.starts_with(&self.root) {
-            return Err(io::Error::from_raw_os_error(libc::EIO))
-        }
-        Ok(canon)
-    }
 }
 
 fn cstr(path: &Path) -> io::Result<CString> {
@@ -152,19 +135,16 @@ impl FileSystemOps for FileSystem {
     }
 
     fn open(&self, path: &Path, flags: u32) -> io::Result<P9File> {
-        let path = self.canonicalize(path)?;
         let file =FileSystem::open_with_flags(&path, flags, self.euid_root)?;
         Ok(self.new_file(file))
     }
 
     fn create(&self, path: &Path, flags: u32, mode: u32) -> io::Result<P9File> {
-        let path = self.canonicalize_parent(path)?;
         let file = FileSystem::create_with_flags(&path, flags, mode, self.euid_root)?;
         Ok(self.new_file(file))
     }
 
     fn write_statfs(&self, path: &Path, pp: &mut PduParser) -> io::Result<()> {
-        let path = self.canonicalize(path)?;
         let path_cstr = cstr(&path)?;
 
         let mut statfs: libc::statfs64 = unsafe { mem::zeroed() };
@@ -187,7 +167,6 @@ impl FileSystemOps for FileSystem {
     }
 
     fn chown(&self, path: &Path, uid: u32, gid: u32) -> io::Result<()> {
-        let path = self.canonicalize(path)?;
         let path_cstr = cstr(&path)?;
         unsafe {
             if libc::chown(path_cstr.as_ptr(), uid, gid) < 0 {
@@ -203,7 +182,6 @@ impl FileSystemOps for FileSystem {
     }
 
     fn touch(&self, path: &Path, which: FsTouch, tv: (u64, u64)) -> io::Result<()> {
-        let path = self.canonicalize(path)?;
         let path_cstr = cstr(&path)?;
 
         let tval = libc::timespec {
@@ -234,7 +212,6 @@ impl FileSystemOps for FileSystem {
     }
 
     fn truncate(&self, path: &Path, size: u64) -> io::Result<()> {
-        let path = self.canonicalize(path)?;
         let path_cstr = cstr(&path)?;
         unsafe {
             if libc::truncate64(path_cstr.as_ptr(), size as i64) < 0 {
@@ -245,39 +222,30 @@ impl FileSystemOps for FileSystem {
     }
 
     fn readlink(&self, path: &Path) -> io::Result<OsString> {
-        let path = self.canonicalize_parent(path)?;
         fs::read_link(&path).map(|pbuf| pbuf.into_os_string())
     }
 
     fn symlink(&self, target: &Path, linkpath: &Path) -> io::Result<()> {
-        let linkpath = self.canonicalize_parent(linkpath)?;
         unix::fs::symlink(target, linkpath)
     }
 
     fn link(&self, target: &Path, newpath: &Path) -> io::Result<()> {
-        let target = self.canonicalize(target)?;
-        let newpath= self.canonicalize_parent(newpath)?;
         fs::hard_link(target, newpath)
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-        let from = self.canonicalize(from)?;
-        let to = self.canonicalize_parent(to)?;
         fs::rename(from, to)
     }
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {
-        let path = self.canonicalize(path)?;
         fs::remove_file(path)
     }
 
     fn remove_dir(&self, path: &Path) -> io::Result<()> {
-        let path = self.canonicalize(path)?;
         fs::remove_dir(path)
     }
 
     fn create_dir(&self, path: &Path, mode: u32) -> io::Result<()> {
-        let path = self.canonicalize_parent(path)?;
         fs::DirBuilder::new()
             .recursive(false)
             .mode(mode & 0o755)
