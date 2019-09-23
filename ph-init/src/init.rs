@@ -160,6 +160,12 @@ impl InitServer {
     }
 
     pub fn run_daemons(&mut self) -> Result<()> {
+        if !Path::new("/dev/wl0").exists() {
+            return Ok(());
+        }
+
+        chmod("/dev/wl0", 0o666)?;
+
         let dbus = ServiceLaunch::new("dbus-daemon", "/usr/bin/dbus-daemon")
             .base_environment()
             .uidgid(1000,1000)
@@ -178,20 +184,34 @@ impl InitServer {
 
         self.services.insert(dbus.pid(), dbus);
 
+        let shm_driver = if self.cmdline.has_var("phinit.virtwl_dmabuf") {
+            "virtwl-dmabuf" 
+        } else {
+            "virtwl"
+        };
+
         let sommelier = ServiceLaunch::new("sommelier", "/opt/ph/usr/bin/sommelier")
             .base_environment()
             .uidgid(1000,1000)
+            .env("SOMMELIER_SHM_DRIVER", shm_driver)
             .arg("--master")
             .pipe_output()
             .launch()?;
 
         self.services.insert(sommelier.pid(), sommelier);
 
-        Self::write_xauth().map_err(Error::XAuthFail)?;
+
+        if self.cmdline.has_var("phinit.no_x11") {
+            return Ok(());
+        }
+
+        mkdir_mode("/tmp/.X11-unix", 0o1777)?;
+        self.write_xauth().map_err(Error::XAuthFail)?;
 
         let sommelierx = ServiceLaunch::new("sommelier-x", "/opt/ph/usr/bin/sommelier")
             .base_environment()
             .uidgid(1000,1000)
+            .env("SOMMELIER_SHM_DRIVER", shm_driver)
             .arg("-X")
             .arg("--x-display=0")
             .arg("--no-exit-with-child")

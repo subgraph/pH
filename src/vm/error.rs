@@ -25,6 +25,7 @@ pub enum ErrorKind {
     DiskImageOpen(disk::Error),
     TerminalTermios(io::Error),
     IoError(io::Error),
+    MemoryManagerCreate,
 }
 
 impl ErrorKind {
@@ -45,6 +46,7 @@ impl ErrorKind {
             ErrorKind::DiskImageOpen(_) => "failed to open disk image",
             ErrorKind::TerminalTermios(_) => "failed termios",
             ErrorKind::IoError(_) => "i/o error",
+            ErrorKind::MemoryManagerCreate => "memory manager",
         }
     }
 }
@@ -58,6 +60,7 @@ impl fmt::Display for ErrorKind {
             ErrorKind::DiskImageOpen(ref e) => write!(f, "failed to open disk image: {}", e),
             ErrorKind::TerminalTermios(ref e) => write!(f, "error reading/restoring terminal state: {}", e),
             ErrorKind::IoError(ref e) => write!(f, "i/o error: {}", e),
+            ErrorKind::MemoryManagerCreate => write!(f, "error creating memory manager"),
             _ => write!(f, "{}", self.as_str()),
         }
     }

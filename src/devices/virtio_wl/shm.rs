@@ -1,6 +1,6 @@
 use std::os::unix::io::{AsRawFd,RawFd};
 
-use crate::memory::MemoryManager;
+use crate::memory::{MemoryManager, DrmDescriptor};
 use crate::system::MemoryFd;
 
 use crate::devices::virtio_wl::{
@@ -36,6 +36,15 @@ impl VfdSharedMemory {
         let (pfn, slot) = mm.register_device_memory(memfd.as_raw_fd(), size)
             .map_err(Error::RegisterMemoryFailed)?;
         Ok(Self::new(vfd_id, transition_flags, mm.clone(), memfd, slot, pfn))
+    }
+
+    pub fn create_dmabuf(vfd_id: u32, tflags: bool, width: u32, height: u32, format: u32, mm: &MemoryManager) -> Result<(Self, DrmDescriptor)> {
+        let (pfn, slot, fd, desc)  = mm.allocate_drm_buffer(width, height, format)
+            .map_err(Error::DmaBuf)?;
+        let memfd = MemoryFd::from_filedesc(fd)
+            .map_err(Error::DmaBufSize)?;
+        let vfd = Self::new(vfd_id, tflags, mm.clone(), memfd, slot, pfn);
+        Ok((vfd, desc))
     }
 }
 

@@ -4,7 +4,7 @@ use std::os::unix::io::{AsRawFd,RawFd};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::memory::MemoryManager;
+use crate::memory::{MemoryManager, DrmDescriptor};
 use crate::system::{FileDesc, FileFlags,EPoll,MemoryFd};
 use crate::virtio::{VirtQueue, Chain};
 
@@ -66,6 +66,13 @@ impl VfdManager {
         let (pfn,size) = shm.pfn_and_size().unwrap();
         self.vfd_map.insert(vfd_id, Box::new(shm));
         Ok((pfn,size))
+    }
+
+    pub fn create_dmabuf(&mut self, vfd_id: u32, width: u32, height: u32, format: u32) -> Result<(u64, u64, DrmDescriptor)> {
+        let (vfd, desc) = VfdSharedMemory::create_dmabuf(vfd_id, self.use_transition_flags, width, height, format, &self.mm)?;
+        let (pfn, size) = vfd.pfn_and_size().unwrap();
+        self.vfd_map.insert(vfd_id, Box::new(vfd));
+        Ok((pfn, size, desc))
     }
 
     pub fn create_socket(&mut self, vfd_id: u32) -> Result<u32> {

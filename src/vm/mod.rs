@@ -67,20 +67,22 @@ impl Vm {
         kvm.create_irqchip()?;
         Ok(kvm)
     }
-    fn create_memory_manager(ram_size: usize) -> Result<MemoryManager> {
+    fn create_memory_manager(ram_size: usize, use_drm: bool) -> Result<MemoryManager> {
         let kvm = Self::create_kvm()?;
         let ram = GuestRam::new(ram_size, &kvm)?;
         let dev_addr_start = get_base_dev_pfn(ram_size as u64) * 4096;
         let dev_addr_size = u64::max_value() - dev_addr_start;
         let allocator = SystemAllocator::new(AddressRange::new(dev_addr_start,dev_addr_size as usize));
-        Ok(MemoryManager::new(kvm, ram, allocator))
+        Ok(MemoryManager::new(kvm, ram, allocator, use_drm).map_err(|_| ErrorKind::MemoryManagerCreate)?)
     }
 
     fn setup_virtio(config: &mut VmConfig, cmdline: &mut KernelCmdLine, virtio: &mut VirtioBus) -> Result<()> {
         devices::VirtioSerial::create(virtio)?;
         devices::VirtioRandom::create(virtio)?;
-        devices::VirtioWayland::create(virtio)?;
-        devices::VirtioP9::create(virtio, "home", config.homedir(), false, false)?;
+
+        if config.is_wayland_enabled() {
+            devices::VirtioWayland::create(virtio)?;
+        }
 
         let mut block_root = false;
 
@@ -131,7 +133,8 @@ impl Vm {
 
     pub fn open(mut config: VmConfig) -> Result<Vm> {
 
-        let mut memory = Self::create_memory_manager(config.ram_size())?;
+        let with_drm = config.is_wayland_enabled() && config.is_dmabuf_enabled();
+        let mut memory = Self::create_memory_manager(config.ram_size(), with_drm)?;
 
         let mut cmdline = KernelCmdLine::new_default();
 
@@ -152,6 +155,11 @@ impl Vm {
         if config.rootshell() {
             cmdline.push("phinit.rootshell");
         }
+
+        if memory.drm_available() && config.is_dmabuf_enabled() {
+            cmdline.push("phinit.virtwl_dmabuf");
+        }
+
         if let Some(realm) = config.realm_name() {
             cmdline.push_set_val("phinit.realm", realm);
         }

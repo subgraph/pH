@@ -4,9 +4,9 @@
 
 #[macro_use] mod log;
 mod vm;
-mod memory;
 #[macro_use]
 mod system;
+mod memory;
 mod devices;
 mod kvm;
 mod virtio;

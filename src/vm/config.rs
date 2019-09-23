@@ -11,6 +11,8 @@ pub struct VmConfig {
     ncpus: usize,
     verbose: bool,
     rootshell: bool,
+    wayland: bool,
+    dmabuf: bool,
     home: String,
     launch_systemd: bool,
     kernel_path: Option<PathBuf>,
@@ -31,8 +33,9 @@ impl VmConfig {
             ncpus: 1,
             verbose: false,
             rootshell: false,
-            home: String::from("/home/user"),
-            launch_systemd: false,
+            wayland: true,
+            dmabuf: false,
+            home: Self::default_homedir(),
             kernel_path: None,
             init_path: None,
             init_cmd: None,
@@ -43,6 +46,15 @@ impl VmConfig {
         };
         config.parse_args();
         config
+    }
+
+    fn default_homedir() -> String {
+        if let Ok(home) = env::var("HOME") {
+            if Path::new(&home).exists() {
+                return home;
+            }
+        }
+        String::from("/home/user")
     }
 
     pub fn ram_size_megs(mut self, megs: usize) -> Self {
@@ -155,6 +167,21 @@ impl VmConfig {
         self.realm_name.as_ref().map(|s| s.as_str())
     }
 
+    pub fn is_wayland_enabled(&self) -> bool {
+        if !self.wayland {
+            return false;
+        }
+        let display = env::var("WAYLAND_DISPLAY").unwrap_or("wayland-0".to_string());
+        let xdg_runtime = env::var("XDG_RUNTIME_DIR").unwrap_or("/run/user/1000".to_string());
+
+        let socket= Path::new(xdg_runtime.as_str()).join(display);
+        socket.exists()
+    }
+
+    pub fn is_dmabuf_enabled(&self) -> bool {
+        self.dmabuf
+    }
+
     fn add_realmfs_by_name(&mut self, realmfs: &str) {
         let path = Path::new("/realms/realmfs-images")
             .join(format!("{}-realmfs.img", realmfs));
@@ -183,6 +210,13 @@ impl VmConfig {
         }
         if args.has_arg("--root") {
             self.rootshell = true;
+        }
+        if args.has_arg("--no-wayland") {
+            self.wayland = false;
+            self.dmabuf = false;
+        }
+        if args.has_arg("--use-dmabuf") {
+            self.dmabuf = true;
         }
         if let Some(home) = args.arg_with_value("--home") {
             self.home = home.to_string();

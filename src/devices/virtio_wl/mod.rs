@@ -23,8 +23,11 @@ mod consts {
     pub const VIRTIO_WL_CMD_VFD_NEW_CTX: u32 = 260;
     pub const VIRTIO_WL_CMD_VFD_NEW_PIPE: u32 = 261;
     pub const VIRTIO_WL_CMD_VFD_HUP: u32 = 262;
+    pub const VIRTIO_WL_CMD_VFD_NEW_DMABUF: u32 = 263;
+    pub const VIRTIO_WL_CMD_VFD_DMABUF_SYNC: u32 = 264;
     pub const VIRTIO_WL_RESP_OK: u32 = 4096;
     pub const VIRTIO_WL_RESP_VFD_NEW: u32 = 4097;
+    pub const VIRTIO_WL_RESP_VFD_NEW_DMABUF: u32 = 4098;
     pub const VIRTIO_WL_RESP_ERR: u32 = 4352;
     pub const VIRTIO_WL_RESP_OUT_OF_MEMORY: u32 = 4353;
     pub const VIRTIO_WL_RESP_INVALID_ID: u32 = 4354;
@@ -93,6 +96,9 @@ pub enum Error {
     TooManySendVfds(usize),
     FailedPollContextCreate(system::Error),
     FailedPollAdd(system::Error),
+    DmaSync(vm::Error),
+    DmaBuf(MemError),
+    DmaBufSize(system::Error),
 }
 
 impl fmt::Display for Error {
@@ -113,6 +119,9 @@ impl fmt::Display for Error {
             TooManySendVfds(n) => write!(f, "message has too many vfd ids: {}", n),
             FailedPollContextCreate(e) => write!(f, "failed creating poll context: {}", e),
             FailedPollAdd(e) => write!(f, "failed adding fd to poll context: {}", e),
+            DmaSync(e) => write!(f, "error calling dma sync: {}", e),
+            DmaBuf(e) => write!(f, "failed creating DMA buf: {}", e),
+            DmaBufSize(e) => write!(f, "failed getting DMA buf size: {}", e),
         }
     }
 }

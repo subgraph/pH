@@ -1,25 +1,34 @@
 use std::collections::HashMap;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd,RawFd};
 use std::sync::{Arc, RwLock};
 
 use crate::memory::{GuestRam, SystemAllocator, Mapping, Error, Result};
 use crate::kvm::Kvm;
-use crate::system::BitVec;
+use crate::system::{BitVec, FileDesc};
+use crate::memory::drm::{DrmBufferAllocator, DrmDescriptor};
+use std::io::SeekFrom;
 
 #[derive(Clone)]
 pub struct MemoryManager {
     kvm: Kvm,
     ram: GuestRam,
     device_memory: Arc<RwLock<DeviceMemory>>,
+    drm_allocator: Option<DrmBufferAllocator>,
 }
 
 impl MemoryManager {
 
-    pub fn new(kvm: Kvm, ram: GuestRam, allocator: SystemAllocator) -> Self {
+    pub fn new(kvm: Kvm, ram: GuestRam, allocator: SystemAllocator, use_drm: bool) -> Result<Self> {
         let device_memory = RwLock::new(DeviceMemory::new(ram.region_count(), allocator)).into();
-        MemoryManager {
+        let drm_allocator = if use_drm {
+            DrmBufferAllocator::open().ok()
+        } else {
+            None
+        };
+        Ok(MemoryManager {
             kvm, ram, device_memory,
-        }
+            drm_allocator,
+        })
     }
 
     pub fn guest_ram(&self) -> &GuestRam {
@@ -42,6 +51,22 @@ impl MemoryManager {
     pub fn unregister_device_memory(&self, slot: u32) -> Result<()> {
         let mut devmem = self.device_memory.write().unwrap();
         devmem.unregister(self.kvm(), slot)
+    }
+
+    pub fn drm_available(&self) -> bool {
+        self.drm_allocator.is_some()
+    }
+
+    pub fn allocate_drm_buffer(&self, width: u32, height: u32, format: u32) -> Result<(u64, u32, FileDesc, DrmDescriptor)> {
+        if let Some(drm_allocator) = self.drm_allocator.as_ref() {
+            let (fd, desc) = drm_allocator.allocate(width, height, format)?;
+            let size = fd.seek(SeekFrom::End(0)).map_err(Error::CreateBuffer)?;
+
+            let (pfn, slot) = self.register_device_memory(fd.as_raw_fd(), size as usize)?;
+            Ok((pfn, slot, fd, desc))
+        } else {
+            Err(Error::NoDrmAllocator)
+        }
     }
 }
 

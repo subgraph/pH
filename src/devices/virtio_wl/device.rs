@@ -4,10 +4,19 @@ use std::thread;
 
 use crate::{vm, system};
 use crate::system::EPoll;
-use crate::memory::MemoryManager;
+use crate::memory::{MemoryManager, DrmDescriptor};
 use crate::virtio::{VirtQueue, EventFd, Chain, VirtioBus, VirtioDeviceOps};
 
 use crate::devices::virtio_wl::{vfd::VfdManager, consts::*, Error, Result, VfdObject};
+use crate::system::ioctl::ioctl_with_ref;
+use std::os::raw::{c_ulong, c_uint, c_ulonglong};
+
+#[repr(C)]
+struct dma_buf_sync {
+    flags: c_ulonglong,
+}
+const DMA_BUF_IOCTL_BASE: c_uint = 0x62;
+const DMA_BUF_IOCTL_SYNC: c_ulong = iow!(DMA_BUF_IOCTL_BASE, 0, ::std::mem::size_of::<dma_buf_sync>() as i32);
 
 pub struct VirtioWayland {
     feature_bits: u64,
@@ -165,6 +174,8 @@ impl <'a> MessageHandler<'a> {
             VIRTIO_WL_CMD_VFD_NEW => self.cmd_new_alloc(),
             VIRTIO_WL_CMD_VFD_CLOSE => self.cmd_close(),
             VIRTIO_WL_CMD_VFD_SEND => self.cmd_send(),
+            VIRTIO_WL_CMD_VFD_NEW_DMABUF => self.cmd_new_dmabuf(),
+            VIRTIO_WL_CMD_VFD_DMABUF_SYNC => self.cmd_dmabuf_sync(),
             VIRTIO_WL_CMD_VFD_NEW_CTX => self.cmd_new_ctx(),
             VIRTIO_WL_CMD_VFD_NEW_PIPE => self.cmd_new_pipe(),
             v => {
@@ -196,6 +207,70 @@ impl <'a> MessageHandler<'a> {
         self.chain.w32(size as u32)?;
         self.responded = true;
         Ok(())
+    }
+
+    fn cmd_new_dmabuf(&mut self) -> Result<()> {
+        let id = self.chain.r32()?;
+        let _flags = self.chain.r32()?;
+        let _pfn = self.chain.r64()?;
+        let _size = self.chain.r32()?;
+        let width = self.chain.r32()?;
+        let height = self.chain.r32()?;
+        let format = self.chain.r32()?;
+
+        match self.device.vfd_manager.create_dmabuf(id, width,height, format) {
+            Ok((pfn, size, desc)) => self.resp_dmabuf_new(id, pfn, size as u32, desc),
+            Err(e) => {
+                if !(height == 0 && width == 0) {
+                    warn!("virtio_wl: Failed to create dmabuf: {}", e);
+                }
+                self.responded = true;
+                self.send_err()
+            }
+        }
+    }
+
+    fn resp_dmabuf_new(&mut self, id: u32, pfn: u64, size: u32, desc: DrmDescriptor) -> Result<()> {
+        self.chain.w32(VIRTIO_WL_RESP_VFD_NEW_DMABUF)?;
+        self.chain.w32(0)?;
+        self.chain.w32(id)?;
+        self.chain.w32(0)?;
+        self.chain.w64(pfn)?;
+        self.chain.w32(size)?;
+        self.chain.w32(0)?;
+        self.chain.w32(0)?;
+        self.chain.w32(0)?;
+        self.chain.w32(desc.planes[0].stride)?;
+        self.chain.w32(desc.planes[1].stride)?;
+        self.chain.w32(desc.planes[2].stride)?;
+        self.chain.w32(desc.planes[0].offset)?;
+        self.chain.w32(desc.planes[1].offset)?;
+        self.chain.w32(desc.planes[2].offset)?;
+        self.responded = true;
+        Ok(())
+    }
+
+    fn cmd_dmabuf_sync(&mut self) -> Result<()> {
+        let id = self.chain.r32()?;
+        let flags = self.chain.r32()?;
+
+        let vfd = match self.device.get_mut_vfd(id) {
+            Some(vfd) => vfd,
+            None => return self.send_invalid_id(),
+        };
+        let fd = match vfd.send_fd() {
+            Some(fd) => fd,
+            None => return self.send_invalid_id(),
+        };
+
+        unsafe {
+            let sync = dma_buf_sync {
+                flags: flags as u64,
+            };
+            ioctl_with_ref(fd, DMA_BUF_IOCTL_SYNC, &sync).map_err(Error::DmaSync)?;
+        }
+
+        self.send_ok()
     }
 
     fn cmd_close(&mut self) -> Result<()> {
