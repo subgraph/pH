@@ -14,7 +14,6 @@ pub struct VmConfig {
     wayland: bool,
     dmabuf: bool,
     home: String,
-    launch_systemd: bool,
     kernel_path: Option<PathBuf>,
     init_path: Option<PathBuf>,
     init_cmd: Option<String>,
@@ -97,11 +96,6 @@ impl VmConfig {
         self
     }
 
-    pub fn use_systemd(mut self) -> Self {
-        self.launch_systemd = true;
-        self
-    }
-
     pub fn synthetic_fs(mut self, sfs: SyntheticFS) -> Self {
         self.synthetic = Some(sfs);
         self
@@ -137,10 +131,6 @@ impl VmConfig {
 
     pub fn homedir(&self) -> &str {
         &self.home
-    }
-
-    pub fn launch_systemd(&self) -> bool {
-        self.launch_systemd
     }
 
     pub fn has_block_image(&self) -> bool {
