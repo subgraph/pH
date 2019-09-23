@@ -918,9 +918,9 @@ diff -uprN linux-5.3/drivers/virtio/virtio_wl.c linux-5.3-wl/drivers/virtio/virt
 +	ctrl_dmabuf_sync->vfd_id = vfd->id;
 +	ctrl_dmabuf_sync->flags = flags;
 +
-+	sg_init_one(&in_sg, &ctrl_dmabuf_sync->hdr,
-+		    sizeof(struct virtio_wl_ctrl_vfd_dmabuf_sync));
 +	sg_init_one(&out_sg, &ctrl_dmabuf_sync->hdr,
++		    sizeof(struct virtio_wl_ctrl_vfd_dmabuf_sync));
++	sg_init_one(&in_sg, &ctrl_dmabuf_sync->hdr,
 +		    sizeof(struct virtio_wl_ctrl_hdr));
 +
 +	init_completion(&finish_completion);
