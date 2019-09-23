@@ -30,6 +30,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use termios::Termios;
 use crate::devices::SyntheticFS;
+use crate::disk::DiskImage;
 
 pub struct Vm {
     _config: VmConfig,
@@ -84,20 +85,34 @@ impl Vm {
             devices::VirtioWayland::create(virtio)?;
         }
 
-        let mut block_root = false;
+        let homedir = config.homedir();
+        devices::VirtioP9::create(virtio, "home", homedir, false, false)?;
+        if homedir != "/home/user" {
+            cmdline.push_set_val("phinit.home", homedir);
+        }
+
+        let mut block_root = None;
 
         for mut disk in config.get_realmfs_images() {
             disk.open().map_err(ErrorKind::DiskImageOpen)?;
+            if block_root == None {
+                block_root = Some(disk.read_only());
+            }
             devices::VirtioBlock::create(virtio, disk)?;
-            block_root = true;
-        }
-        for mut disk in config.get_raw_disk_images() {
-            disk.open().map_err(ErrorKind::DiskImageOpen)?;
-            devices::VirtioBlock::create(virtio, disk)?;
-            block_root = true;
         }
 
-        if block_root {
+        for mut disk in config.get_raw_disk_images() {
+            disk.open().map_err(ErrorKind::DiskImageOpen)?;
+            if block_root == None {
+                block_root = Some(disk.read_only());
+            }
+            devices::VirtioBlock::create(virtio, disk)?;
+        }
+
+        if let Some(read_only) = block_root {
+            if !read_only {
+                cmdline.push("phinit.root_rw");
+            }
             cmdline.push("phinit.root=/dev/vda");
             cmdline.push("phinit.rootfstype=ext4");
         } else {
@@ -171,9 +186,6 @@ impl Vm {
         let mut virtio = VirtioBus::new(memory.clone(), io_dispatch.clone(), memory.kvm().clone());
         Self::setup_virtio(&mut config, &mut cmdline, &mut virtio)?;
 
-        if config.launch_systemd() {
-            cmdline.push("phinit.run_systemd");
-        }
         if let Some(init_cmd) = config.get_init_cmdline() {
             cmdline.push_set_val("init", init_cmd);
         }

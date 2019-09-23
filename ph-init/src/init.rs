@@ -10,6 +10,7 @@ use std::io::Read;
 
 pub struct InitServer {
     hostname: String,
+    homedir: String,
     cmdline: CmdLine,
     rootfs: RootFS,
     services: BTreeMap<u32, Service>,
@@ -20,11 +21,14 @@ impl InitServer {
         Self::check_pid1()?;
         let hostname = hostname.to_string();
         let cmdline = CmdLine::load()?;
+        let homedir = cmdline.lookup("phinit.home")
+            .unwrap_or("/home/user".to_string());
         let rootfs = RootFS::load(&cmdline)?;
         let services = BTreeMap::new();
 
         Ok(InitServer {
             hostname,
+            homedir,
             cmdline,
             rootfs,
             services,
@@ -53,6 +57,11 @@ impl InitServer {
             Err(Error::Pid1)
         }
     }
+
+    fn homedir(&self) -> &str {
+        &self.homedir
+    }
+
 
     pub fn set_loglevel(&self) {
         if self.cmdline.has_var("phinit.verbose") {
@@ -90,10 +99,6 @@ impl InitServer {
         mkdir("/run/user/1000")?;
         chown("/run/user/1000", 1000,1000)?;
 
-        if Path::new("/dev/wl0").exists() {
-            chmod("/dev/wl0", 0o666)?;
-            mkdir_mode("/tmp/.X11-unix", 0o1777)?;
-        }
         self.mount_home_if_exists()?;
         Logger::set_file_output("/run/phinit.log")
             .map_err(Error::OpenLogFailed)?;
@@ -150,11 +155,11 @@ impl InitServer {
 
     pub fn mount_home_if_exists(&self) -> Result<()> {
         if self.has_9p_home() {
-            let homedir = Path::new("/home/user");
+            let homedir = Path::new(self.homedir());
             if !homedir.exists() {
                 mkdir(homedir)?;
             }
-            mount_9p("home", "/home/user")?;
+            mount_9p("home", self.homedir())?;
         }
         Ok(())
     }
@@ -169,7 +174,7 @@ impl InitServer {
         let dbus = ServiceLaunch::new("dbus-daemon", "/usr/bin/dbus-daemon")
             .base_environment()
             .uidgid(1000,1000)
-            .env("HOME", "/home/user")
+            .env("HOME", self.homedir())
             .env("NO_AT_BRIDGE", "1")
             .env("QT_ACCESSIBILITY", "1")
             .env("SHELL", "/bin/bash")
@@ -215,7 +220,7 @@ impl InitServer {
             .arg("-X")
             .arg("--x-display=0")
             .arg("--no-exit-with-child")
-            .arg("--x-auth=/home/user/.Xauthority")
+            .arg(format!("--x-auth={}/.Xauthority", self.homedir()))
             .arg("/bin/true")
             .pipe_output()
             .launch()?;
@@ -226,8 +231,8 @@ impl InitServer {
         Ok(())
     }
 
-    fn write_xauth() -> io::Result<()> {
-        let xauth_path = "/home/user/.Xauthority";
+    fn write_xauth(&self) -> io::Result<()> {
+        let xauth_path = format!("{}/.Xauthority", self.homedir());
 
         let mut randbuf = [0; 16];
         let mut file = fs::File::open("/dev/urandom")?;
@@ -250,20 +255,20 @@ impl InitServer {
         v.extend_from_slice(&[0x00, 0x10]);
         v.extend_from_slice(&randbuf);
 
-        fs::write("/home/user/.Xauthority", v)?;
-        _chown(xauth_path, 1000, 1000)?;
+        fs::write(&xauth_path, v)?;
+        _chown(&xauth_path, 1000, 1000)?;
         Ok(())
     }
 
     pub fn launch_console_shell(&mut self, splash: &'static str) -> Result<()> {
         let root = self.cmdline.has_var("phinit.rootshell");
         let realm = self.cmdline.lookup("phinit.realm");
-        let home = if root { "/" } else { "/home/user" };
+        let home = if root { "/".to_string() } else { self.homedir().to_string() };
 
-        let shell = ServiceLaunch::new_shell(root, home, realm)
+        let shell = ServiceLaunch::new_shell(root, &home, realm)
             .launch_with_preexec(move || {
 //                set_controlling_tty(0, true)?;
-                env::set_current_dir(home)?;
+                env::set_current_dir(&home)?;
                 println!("{}", splash);
                 Ok(())
             })?;
@@ -335,7 +340,10 @@ impl RootFS {
 
     fn mount(&self, target: &str) -> Result<()> {
         let options = self.rootflags.as_ref().map(|s| s.as_str());
-        let flags = libc::MS_RDONLY;
+        let mut flags = libc::MS_NOATIME;
+        if self.readonly {
+            flags |= libc::MS_RDONLY;
+        }
 
         mount(&self.root, target, &self.fstype, flags, options)
             .map_err(|e| Error::RootFsMount(self.root.clone(), e))
