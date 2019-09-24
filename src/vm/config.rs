@@ -157,6 +157,10 @@ impl VmConfig {
         self.realm_name.as_ref().map(|s| s.as_str())
     }
 
+    pub fn is_realm(&self) -> bool {
+        self.realm_name.is_some()
+    }
+
     pub fn is_wayland_enabled(&self) -> bool {
         if !self.wayland {
             return false;

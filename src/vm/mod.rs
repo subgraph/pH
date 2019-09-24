@@ -87,7 +87,7 @@ impl Vm {
 
         let homedir = config.homedir();
         devices::VirtioP9::create(virtio, "home", homedir, false, false)?;
-        if homedir != "/home/user" {
+        if homedir != "/home/user" && !config.is_realm() {
             cmdline.push_set_val("phinit.home", homedir);
         }
 
