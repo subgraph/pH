@@ -16,6 +16,10 @@ impl Error {
     pub fn last_os_error() -> Error {
         Error(unsafe { *__errno_location() })
     }
+
+    pub fn is_interrupted(&self) -> bool {
+        self.0 == libc::EINTR
+    }
 }
 
 impl From<io::Error> for Error {
@@ -32,13 +36,19 @@ impl Display for Error {
     }
 }
 
+impl From<Error> for io::Error {
+    fn from(err: Error) -> io::Error {
+        io::Error::from_raw_os_error(err.0)
+    }
+}
+
 pub fn errno_result<T>() -> Result<T> {
     Err(Error::last_os_error())
 }
 
-pub fn cvt<T: IsMinusOne>(t: T) -> io::Result<T> {
+pub fn cvt<T: IsMinusOne>(t: T) -> Result<T> {
     if t.is_minus_one() {
-        Err(io::Error::last_os_error())
+        Err(Error::last_os_error())
     } else {
         Ok(t)
     }

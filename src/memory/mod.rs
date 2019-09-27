@@ -31,7 +31,7 @@ pub enum Error {
     GbmCreateDevice(system::Error),
     GbmCreateBuffer(system::Error),
     OpenRenderNode(io::Error),
-    PrimeHandleToFD(VmError),
+    PrimeHandleToFD(system::Error),
     CreateBuffer(io::Error),
     NoDrmAllocator,
 }

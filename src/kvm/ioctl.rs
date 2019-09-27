@@ -6,6 +6,7 @@ use std::fmt;
 use crate::system::ioctl::{ioctl_with_val,ioctl_with_ref,ioctl_with_mut_ref};
 
 use crate::vm::{Result,Error,ErrorKind};
+use crate::system;
 
 
 const KVMIO:     u64 = 0xAE;
@@ -602,9 +603,9 @@ pub fn kvm_run(cpufd: &VcpuFd) -> Result<u32> {
     }
 }
 
-pub fn ioctl_err(ioctl_name: &'static str, e: Error) -> Error {
+pub fn ioctl_err(ioctl_name: &'static str, e: system::Error) -> Error {
     if e.is_interrupted() {
-        e
+        Error::new(ErrorKind::Interrupted, e)
     } else {
         Error::new(ErrorKind::IoctlFailed(ioctl_name), e)
     }

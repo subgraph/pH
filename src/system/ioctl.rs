@@ -1,6 +1,6 @@
 use libc::{self, c_ulong, c_void};
 use std::os::unix::io::RawFd;
-use crate::vm::{Error,Result};
+use crate::system::{Error,Result};
 
 pub const IOC_SIZEBITS:  u64 = 14;
 pub const IOC_DIRBITS:   u64 = 2;
@@ -26,7 +26,7 @@ macro_rules! ioc {
        ((($dir as u64 & $crate::system::ioctl::IOC_DIRMASK) << $crate::system::ioctl::IOC_DIRSHIFT) |
         (($ty as u64 & $crate::system::ioctl::IOC_TYPEMASK) << $crate::system::ioctl::IOC_TYPESHIFT) |
         (($nr as u64 & $crate::system::ioctl::IOC_NRMASK) << $crate::system::ioctl::IOC_NRSHIFT) |
-        (($sz as u64 & $crate::system::ioctl::IOC_SIZEMASK) << $crate::system::ioctl::IOC_SIZESHIFT)) as c_ulong)
+        (($sz as u64 & $crate::system::ioctl::IOC_SIZEMASK) << $crate::system::ioctl::IOC_SIZESHIFT)) as ::libc::c_ulong)
 }
 
 macro_rules! io {
@@ -48,7 +48,7 @@ macro_rules! iorw {
 pub unsafe fn ioctl_with_val(fd: RawFd, request: c_ulong, val: c_ulong) -> Result<u32> {
     let ret = libc::ioctl(fd, request, val);
     if ret < 0 {
-        return Err(Error::from_last_errno());
+        return Err(Error::last_os_error());
     }
     Ok(ret as u32)
 }
@@ -56,7 +56,7 @@ pub unsafe fn ioctl_with_val(fd: RawFd, request: c_ulong, val: c_ulong) -> Resul
 pub unsafe fn ioctl_with_ref<T>(fd: RawFd, request: c_ulong, arg: &T) -> Result<u32> {
     let ret = libc::ioctl(fd, request, arg as *const T as *const c_void);
     if ret < 0 {
-        return Err(Error::from_last_errno());
+        return Err(Error::last_os_error());
     }
     Ok(ret as u32)
 }
@@ -64,7 +64,7 @@ pub unsafe fn ioctl_with_ref<T>(fd: RawFd, request: c_ulong, arg: &T) -> Result<
 pub unsafe fn ioctl_with_mut_ref<T>(fd: RawFd, request: c_ulong, arg: &mut T) -> Result<u32> {
     let ret = libc::ioctl(fd, request, arg as *mut T as *mut c_void);
     if ret < 0 {
-        return Err(Error::from_last_errno());
+        return Err(Error::last_os_error());
     }
     Ok(ret as u32)
 }
