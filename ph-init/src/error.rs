@@ -31,6 +31,8 @@ pub enum Error {
     RebootFailed(io::Error),
     OpenLogFailed(io::Error),
     XAuthFail(io::Error),
+    WriteBashrc(io::Error),
+    NetworkConfigure(netlink::Error),
 }
 
 impl fmt::Display for Error {
@@ -67,6 +69,8 @@ impl fmt::Display for Error {
             RebootFailed(err) => write!(f, "could not reboot system: {}", err),
             OpenLogFailed(err) => write!(f, "failed to open log file: {}", err),
             XAuthFail(err) => write!(f, "error creating .Xauthority file: {}", err),
+            WriteBashrc(err) => write!(f, "error writing bashrc file: {}", err),
+            NetworkConfigure(err) => write!(f, "error configuring network: {}", err),
         }
     }
 }

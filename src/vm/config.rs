@@ -105,6 +105,13 @@ impl VmConfig {
 
         let _terminal_restore = TerminalRestore::save();
 
+        if let Some(scheme) = Base16Scheme::by_name("black-metal-immortal") {
+            let mut term = AnsiTerminal::new().unwrap();
+            if let Err(err) = term.apply_base16(scheme) {
+                warn!("Failed to set terminal color scheme: {}", err);
+            }
+        }
+
         match Vm::open(self) {
             Ok(vm) => if let Err(err) = vm.start() {
                 notify!("Error starting VM: {}", err);

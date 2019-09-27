@@ -7,6 +7,21 @@ use std::{fs, process, io, env};
 use crate::service::{Service, ServiceLaunch};
 use std::collections::BTreeMap;
 use std::io::Read;
+use std::net::Ipv4Addr;
+use std::str::FromStr;
+use crate::netlink::NetlinkSocket;
+
+const BASHRC: &str = r#"
+export PS1="airwolf > "
+umask 022
+shopt -s checkwinsize
+alias ls='ls --color=auto'
+if [ -f /usr/share/bash-completion/bash_completion ]; then
+    . /usr/share/bash-completion/bash_completion
+elif [ -f /etc/bash_completion ]; then
+    . /etc/bash_completion
+fi
+"#;
 
 pub struct InitServer {
     hostname: String,

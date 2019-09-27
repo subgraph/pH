@@ -22,6 +22,8 @@ const BASE_ENVIRONMENT: &[&str] = &[
 
 const SHELL_ENVIRONMENT: &[&str] = &[
     "SHELL=/bin/bash",
+    "PATH=/usr/bin:/usr/sbin",
+    "COLORTERM=truecolor",
     "TERM=xterm-256color",
     "GNOME_DESKTOP_SESSION_ID=this-is-deprecated",
     "NO_AT_BRIDGE=1",
@@ -31,6 +33,7 @@ const SHELL_ENVIRONMENT: &[&str] = &[
     "WAYLAND_DISPLAY=wayland-0",
     "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
 ];
+
 
 pub struct Service {
     name: String,
@@ -136,8 +139,8 @@ impl ServiceLaunch {
             .root(root)
             .home(home)
             .env("HOME", home)
-            .shell_environment()
-            .arg("--login");
+            .shell_environment();
+           // .arg("--login");
 
         match realm {
             Some(name) => shell.env("REALM_NAME", name),
