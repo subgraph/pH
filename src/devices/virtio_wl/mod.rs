@@ -96,7 +96,7 @@ pub enum Error {
     TooManySendVfds(usize),
     FailedPollContextCreate(system::Error),
     FailedPollAdd(system::Error),
-    DmaSync(vm::Error),
+    DmaSync(system::Error),
     DmaBuf(MemError),
     DmaBufSize(system::Error),
 }

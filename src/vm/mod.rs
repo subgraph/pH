@@ -31,6 +31,7 @@ use std::sync::atomic::AtomicBool;
 use termios::Termios;
 use crate::devices::SyntheticFS;
 use crate::disk::DiskImage;
+use crate::system::{NetlinkSocket, Tap};
 
 pub struct Vm {
     _config: VmConfig,
@@ -122,7 +123,11 @@ impl Vm {
             cmdline.push_set_val("phinit.rootflags", "trans=virtio");
         }
 
-        Self::setup_synthetic_bootfs(cmdline, virtio)
+        Self::setup_synthetic_bootfs(cmdline, virtio)?;
+        if config.network() {
+            Self::setup_network(config, cmdline, virtio)?;
+        }
+        Ok(())
     }
 
     fn setup_synthetic_bootfs(cmdline: &mut KernelCmdLine, virtio: &mut VirtioBus) -> Result<()> {
@@ -144,6 +149,26 @@ impl Vm {
         cmdline.push_set_val("rootfstype", "9p");
         cmdline.push_set_val("rootflags", "trans=virtio");
         Ok(())
+    }
+
+    fn setup_network(config: &VmConfig, cmdline: &mut KernelCmdLine, virtio: &mut VirtioBus) -> Result<()> {
+        let tap = Self::setup_tap(config.bridge())?;
+        devices::VirtioNet::create(virtio, tap)?;
+        cmdline.push("phinit.ip=172.17.0.22");
+        Ok(())
+    }
+
+    fn setup_tap(bridge_name: &str) -> Result<Tap> {
+        let tap = Tap::new_default()?;
+        let nl = NetlinkSocket::open()?;
+
+        if !nl.interface_exists(bridge_name) {
+            nl.create_bridge(bridge_name)?;
+            nl.set_interface_up(bridge_name)?;
+        }
+        nl.add_interface_to_bridge(tap.name(), bridge_name)?;
+        nl.set_interface_up(tap.name())?;
+        Ok(tap)
     }
 
     pub fn open(mut config: VmConfig) -> Result<Vm> {

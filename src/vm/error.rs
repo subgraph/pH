@@ -5,6 +5,7 @@ use std::str;
 use std::ffi::CStr;
 use libc;
 use crate::disk;
+use crate::system::netlink;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -26,6 +27,7 @@ pub enum ErrorKind {
     TerminalTermios(io::Error),
     IoError(io::Error),
     MemoryManagerCreate,
+    NetworkSetup(netlink::Error),
 }
 
 impl ErrorKind {
@@ -47,6 +49,7 @@ impl ErrorKind {
             ErrorKind::TerminalTermios(_) => "failed termios",
             ErrorKind::IoError(_) => "i/o error",
             ErrorKind::MemoryManagerCreate => "memory manager",
+            ErrorKind::NetworkSetup(_) => "error setting up network",
         }
     }
 }
@@ -61,6 +64,7 @@ impl fmt::Display for ErrorKind {
             ErrorKind::TerminalTermios(ref e) => write!(f, "error reading/restoring terminal state: {}", e),
             ErrorKind::IoError(ref e) => write!(f, "i/o error: {}", e),
             ErrorKind::MemoryManagerCreate => write!(f, "error creating memory manager"),
+            ErrorKind::NetworkSetup(ref e) => write!(f, "error setting up network: {}", e),
             _ => write!(f, "{}", self.as_str()),
         }
     }
@@ -75,6 +79,12 @@ impl From<io::Error> for Error {
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Error {
         Error { repr: Repr::Simple(kind) }
+    }
+}
+
+impl From<netlink::Error> for Error {
+    fn from(err: netlink::Error) -> Error {
+        ErrorKind::NetworkSetup(err).into()
     }
 }
 

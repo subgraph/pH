@@ -1,5 +1,5 @@
 
-use crate::{Error, Result, Logger, LogLevel};
+use crate::{Error, Result, Logger, LogLevel, netlink};
 use crate::cmdline::CmdLine;
 use crate::sys::{sethostname, setsid, set_controlling_tty, mount_devtmpfs, mount_tmpfs, mkdir, umount, mount_sysfs, mount_procfs, mount_devpts, chown, chmod, create_directories, mount_overlay, move_mount, pivot_root, mount_9p, mount, waitpid, reboot, getpid, mount_tmpdir, mount_cgroup, mkdir_mode, umask, _chown};
 use std::path::Path;
@@ -97,6 +97,9 @@ impl InitServer {
         } else {
             self.setup_writeable_root()?;
         }
+        fs::write("/etc/hosts", format!("127.0.0.1       {} localhost\n", self.hostname))
+            .map_err(Error::WriteEtcHosts)?;
+
         umount("/opt/ph/tmp")?;
         umount("/opt/ph/proc")?;
         umount("/opt/ph/dev")?;
@@ -145,8 +148,6 @@ impl InitServer {
                 .map_err(|e| Error::MkDir(String::from("/tmp/sysroot/opt/ph"), e))?;
         }
         pivot_root("/tmp/sysroot", "/tmp/sysroot/opt/ph")?;
-        fs::write("/etc/hosts", format!("127.0.0.1       {} localhost", self.hostname))
-            .map_err(Error::WriteEtcHosts)?;
         Ok(())
     }
 
@@ -178,6 +179,7 @@ impl InitServer {
         }
         Ok(())
     }
+
 
     pub fn run_daemons(&mut self) -> Result<()> {
         if !Path::new("/dev/wl0").exists() {
@@ -246,6 +248,30 @@ impl InitServer {
         Ok(())
     }
 
+    pub fn setup_network(&self) -> Result<()> {
+        if let Some(val) = self.cmdline.lookup("phinit.ip") {
+            if let Ok(ip) = Ipv4Addr::from_str(&val) {
+                self.configure_network(ip)
+                    .map_err(Error::NetworkConfigure)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn configure_network(&self, ip: Ipv4Addr) -> netlink::Result<()> {
+        let mut octets = ip.octets();
+        octets[3] = 1;
+        let gw = Ipv4Addr::from(octets);
+        let nl = NetlinkSocket::open()?;
+        if !nl.interface_exists("eth0") {
+
+        }
+        nl.add_ip_address("eth0", ip, 24)?;
+        nl.set_interface_up("eth0")?;
+        nl.add_default_route(gw)?;
+        Ok(())
+    }
+
     fn write_xauth(&self) -> io::Result<()> {
         let xauth_path = format!("{}/.Xauthority", self.homedir());
 
@@ -276,11 +302,13 @@ impl InitServer {
     }
 
     pub fn launch_console_shell(&mut self, splash: &'static str) -> Result<()> {
+        fs::write("/run/bashrc", BASHRC).map_err(Error::WriteBashrc)?;
         let root = self.cmdline.has_var("phinit.rootshell");
         let realm = self.cmdline.lookup("phinit.realm");
         let home = if root { "/".to_string() } else { self.homedir().to_string() };
 
         let shell = ServiceLaunch::new_shell(root, &home, realm)
+            .arg("--rcfile").arg("/run/bashrc")
             .launch_with_preexec(move || {
 //                set_controlling_tty(0, true)?;
                 env::set_current_dir(&home)?;

@@ -4,7 +4,7 @@ use std::{env, process};
 use crate::devices::SyntheticFS;
 use crate::disk::{RawDiskImage, RealmFSImage, OpenType};
 use libcitadel::Realms;
-use libcitadel::terminal::{TerminalPalette, AnsiTerminal};
+use libcitadel::terminal::{TerminalPalette, AnsiTerminal, Base16Scheme};
 
 pub struct VmConfig {
     ram_size: usize,
@@ -13,7 +13,9 @@ pub struct VmConfig {
     rootshell: bool,
     wayland: bool,
     dmabuf: bool,
+    network: bool,
     home: String,
+    bridge_name: String,
     kernel_path: Option<PathBuf>,
     init_path: Option<PathBuf>,
     init_cmd: Option<String>,
@@ -34,6 +36,8 @@ impl VmConfig {
             rootshell: false,
             wayland: true,
             dmabuf: false,
+            network: true,
+            bridge_name: "vz-clear".to_string(),
             home: Self::default_homedir(),
             kernel_path: None,
             init_path: None,
@@ -136,6 +140,14 @@ impl VmConfig {
         self.rootshell
     }
 
+    pub fn network(&self) -> bool {
+        if unsafe { libc::geteuid() } != 0 {
+            false
+        } else {
+            self.network
+        }
+    }
+
     pub fn homedir(&self) -> &str {
         &self.home
     }
@@ -183,6 +195,10 @@ impl VmConfig {
         self.dmabuf
     }
 
+    pub fn bridge(&self) -> &str {
+        &self.bridge_name
+    }
+
     fn add_realmfs_by_name(&mut self, realmfs: &str) {
         let path = Path::new("/realms/realmfs-images")
             .join(format!("{}-realmfs.img", realmfs));
@@ -200,7 +216,8 @@ impl VmConfig {
             let realmfs = config.realmfs();
             self.add_realmfs_by_name(realmfs);
             self.home = realm.base_path().join("home").display().to_string();
-            self.realm_name = Some(realm.name().to_string())
+            self.realm_name = Some(realm.name().to_string());
+            self.bridge_name = config.network_zone().to_string();
         }
     }
 
@@ -218,6 +235,9 @@ impl VmConfig {
         }
         if args.has_arg("--use-dmabuf") {
             self.dmabuf = true;
+        }
+        if args.has_arg("--no-network") {
+            self.network = false;
         }
         if let Some(home) = args.arg_with_value("--home") {
             self.home = home.to_string();

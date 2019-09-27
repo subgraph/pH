@@ -8,6 +8,7 @@ mod cmdline;
 mod service;
 mod init;
 mod sys;
+mod netlink;
 
 pub use error::{Error,Result};
 pub use log::{Logger,LogLevel};
@@ -17,6 +18,7 @@ fn run_init() -> Result<()> {
     let mut server = InitServer::create("airwolf")?;
     server.setup_filesystem()?;
     server.run_daemons()?;
+    server.setup_network()?;
     server.launch_console_shell(SPLASH)?;
     server.run()?;
     Ok(())
