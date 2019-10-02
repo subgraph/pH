@@ -356,7 +356,7 @@ impl Descriptor {
     pub fn read_from(&self, memory: &GuestRam, offset: usize, buf: &mut[u8]) -> usize {
         let sz = cmp::min(buf.len(), self.remaining(offset));
         if sz > 0 {
-            memory.read_bytes(self.addr + offset as u64, buf).unwrap();
+            memory.read_bytes(self.addr + offset as u64, &mut buf[..sz]).unwrap();
         }
         sz
     }
@@ -364,7 +364,7 @@ impl Descriptor {
     pub fn write_to(&self, memory: &GuestRam, offset: usize, buf: &[u8]) -> usize {
         let sz = cmp::min(buf.len(), self.remaining(offset));
         if sz > 0 {
-            memory.write_bytes(self.addr + offset as u64, buf).unwrap();
+            memory.write_bytes(self.addr + offset as u64, &buf[..sz]).unwrap();
         }
         sz
     }
