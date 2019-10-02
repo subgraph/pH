@@ -11,17 +11,18 @@ pub struct RealmFSImage {
 
 // Just pass everything through to raw image for now
 impl RealmFSImage {
-    pub fn new<P: Into<PathBuf>>(path: P, open_type: OpenType) -> Self {
+    pub fn new<P: Into<PathBuf>>(path: P, open_type: OpenType) -> Result<Self> {
+        assert_ne!(open_type, OpenType::ReadWrite);
         let offset = HEADER_SECTOR_COUNT * SECTOR_SIZE;
-        let raw = RawDiskImage::new_with_offset(path, open_type, offset);
-        RealmFSImage { raw }
-    }
-    pub fn open(&mut self) -> Result<()> {
-        self.raw.open()
+        let raw = RawDiskImage::new_with_offset(path, open_type, offset)?;
+        Ok(RealmFSImage { raw })
     }
 }
 
 impl DiskImage for RealmFSImage {
+    fn open(&mut self) -> Result<()> {
+        self.raw.open()
+    }
     fn read_only(&self) -> bool {
         self.raw.read_only()
     }

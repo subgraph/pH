@@ -5,7 +5,7 @@ use crate::memory::{AddressRange, MemoryManager};
 use super::{VirtioDevice,VirtioDeviceOps,PciIrq};
 use super::consts::*;
 use super::pci::PciBus;
-use crate::vm::Result;
+use crate::virtio::Result;
 use std::iter;
 
 

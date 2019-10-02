@@ -79,7 +79,7 @@ impl EPoll {
                 libc::epoll_wait(self.fd, events.events_ptr(), nevents, timeout)
             };
 
-            if ret == -1 && Error::last_os_error() != Error::from_raw_os_error(EINTR) {
+            if ret == -1 && Error::last_errno() != EINTR {
                 return Err(Error::last_os_error());
             } else if ret as usize > events.len() {
                 return Err(Error::from_raw_os_error(EINVAL));

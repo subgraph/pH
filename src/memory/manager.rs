@@ -4,9 +4,11 @@ use std::sync::{Arc, RwLock};
 
 use crate::memory::{GuestRam, SystemAllocator, Mapping, Error, Result};
 use crate::kvm::Kvm;
-use crate::system::{BitVec, FileDesc};
+use crate::system::FileDesc;
+use crate::util::BitSet;
 use crate::memory::drm::{DrmBufferAllocator, DrmDescriptor};
 use std::io::SeekFrom;
+use crate::memory::ram::MemoryRegion;
 
 #[derive(Clone)]
 pub struct MemoryManager {
@@ -35,12 +37,14 @@ impl MemoryManager {
         &self.ram
     }
 
-    pub fn kvm_mut(&mut self) -> &mut Kvm {
-        &mut self.kvm
-    }
-
     pub fn kvm(&self) -> &Kvm {
         &self.kvm
+    }
+
+    pub fn set_ram_regions(&mut self, regions: Vec<MemoryRegion>) {
+        let mut devmem = self.device_memory.write().unwrap();
+        devmem.set_slots_occupied(0, regions.len());
+        self.ram.set_regions(regions);
     }
 
     pub fn register_device_memory(&self, fd: RawFd, size: usize) -> Result<(u64, u32)> {
@@ -82,19 +86,25 @@ impl MemoryRegistration {
 }
 
 struct DeviceMemory {
-    slots: BitVec,
+    slots: BitSet,
     mappings: HashMap<u32, MemoryRegistration>,
     allocator: SystemAllocator,
 }
 
 impl DeviceMemory {
     fn new(ram_region_count: usize, allocator: SystemAllocator) -> DeviceMemory {
-        let mut slots = BitVec::new();
-        for i in 0..ram_region_count {
-            slots.set_bit(i);
-        }
-        DeviceMemory {
-            slots, mappings: HashMap::new(), allocator
+        let mut devmem = DeviceMemory {
+            slots: BitSet::new(),
+            mappings: HashMap::new(),
+            allocator
+        };
+        devmem.set_slots_occupied(0, ram_region_count);
+        devmem
+    }
+
+    fn set_slots_occupied(&mut self, first: usize, count: usize) {
+        for i in first..first+count {
+            self.slots.insert(i)
         }
     }
 
@@ -134,12 +144,16 @@ impl DeviceMemory {
     }
 
     fn allocate_slot(&mut self) -> u32 {
-        let slot = self.slots.first_unset();
-        self.slots.set_bit(slot);
-        slot as u32
+        for i in 0.. {
+            if !self.slots.get(i) {
+                self.slots.insert(i);
+                return i as u32;
+            }
+        }
+        unreachable!()
     }
 
     fn free_slot(&mut self, slot: u32) {
-        self.slots.clear_bit(slot as usize)
+        self.slots.remove(slot as usize)
     }
 }

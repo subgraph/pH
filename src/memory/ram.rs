@@ -1,17 +1,10 @@
 use std::sync::Arc;
-use std::cmp;
 use std::mem;
 
-use crate::memory::Mapping;
+use crate::memory::{Mapping,AddressRange};
 use crate::memory::mmap::Serializable;
-use crate::memory::AddressRange;
-
-use crate::kvm::Kvm;
-use crate::vm::{Result,Error,ErrorKind};
-
-pub const HIMEM_BASE: u64 = (1 << 32);
-pub const PCI_MMIO_RESERVED_SIZE: usize = (512 << 20);
-pub const PCI_MMIO_RESERVED_BASE: u64 = HIMEM_BASE - PCI_MMIO_RESERVED_SIZE as u64;
+use crate::system::{Result, Error};
+use crate::util::ByteBuffer;
 
 #[derive(Clone)]
 pub struct GuestRam {
@@ -20,11 +13,11 @@ pub struct GuestRam {
 }
 
 impl GuestRam {
-    pub fn new(ram_size: usize, kvm: &Kvm) -> Result<GuestRam> {
-        Ok(GuestRam {
+    pub fn new(ram_size: usize) -> GuestRam {
+        GuestRam {
             ram_size,
-            regions: Arc::new(create_regions(kvm, ram_size)?),
-        })
+            regions:  Vec::new().into(),
+        }
     }
 
     pub fn ram_size(&self) -> usize {
@@ -50,6 +43,11 @@ impl GuestRam {
         region.slice(guest_address, size)
     }
 
+    pub fn mut_buffer(&self, guest_address: u64, size: usize) -> Result<ByteBuffer<&mut [u8]>> {
+        let bytes = self.mut_slice(guest_address, size)?;
+        Ok(ByteBuffer::from_bytes_mut(bytes))
+    }
+
     pub fn mut_slice(&self, guest_address: u64, size: usize) -> Result<&mut[u8]> {
         let region = self.find_region(guest_address, size)?;
         region.mut_slice(guest_address, size)
@@ -65,6 +63,10 @@ impl GuestRam {
         region.read_int(guest_address)
     }
 
+    pub fn set_regions(&mut self, regions: Vec<MemoryRegion>) {
+        self.regions = regions.into();
+    }
+
     #[allow(dead_code)]
     pub fn end_addr(&self) -> u64 {
         self.regions.iter()
@@ -78,45 +80,27 @@ impl GuestRam {
 
     fn find_region(&self, guest_address: u64, size: usize) -> Result<&MemoryRegion> {
         self.regions.iter()
+
                 .find(|r| r.contains(guest_address, size))
-                .ok_or_else(|| Error::from(ErrorKind::InvalidAddress(guest_address)))
+            .ok_or(Error::InvalidAddress(guest_address))
     }
 }
 
-fn add_region(regions: &mut Vec<MemoryRegion>, base: u64, size: usize, kvm: &Kvm) -> Result<()> {
-    let slot = regions.len() as u32;
-    let mr = MemoryRegion::new(base, size)?;
-    kvm.add_memory_region(slot, base, mr.mapping.address(), size)
-        .map_err(|e| Error::new(ErrorKind::RegisterMemoryFailed, e))?;
-    regions.push(mr);
-    Ok(())
-}
-
-fn create_regions(kvm: &Kvm, ram_size: usize) -> Result<Vec<MemoryRegion>> {
-    let mut regions = Vec::new();
-
-    let lowmem_sz = cmp::min(ram_size, PCI_MMIO_RESERVED_BASE as usize);
-    add_region(&mut regions, 0, lowmem_sz, &kvm)?;
-
-    if lowmem_sz < ram_size {
-        let himem_sz = ram_size - lowmem_sz;
-        add_region(&mut regions, HIMEM_BASE, himem_sz, &kvm)?;
-    }
-
-    Ok(regions)
-}
-
-struct MemoryRegion {
+pub struct MemoryRegion {
     guest_range: AddressRange,
     mapping: Mapping,
 }
 
 impl MemoryRegion {
-    fn new(guest_base: u64, size: usize) -> Result<MemoryRegion> {
+    pub fn new(guest_base: u64, size: usize) -> Result<MemoryRegion> {
         Ok(MemoryRegion{
             guest_range: AddressRange::new(guest_base, size),
             mapping: Mapping::new(size)?,
         })
+    }
+
+    pub fn base_address(&self) -> u64 {
+        self.mapping.address()
     }
 
     fn contains(&self, guest_addr: u64, size: usize) -> bool { self.guest_range.contains(guest_addr, size) }
@@ -125,7 +109,7 @@ impl MemoryRegion {
         if self.contains(guest_addr, size) {
             Ok(self.guest_range.offset_of(guest_addr))
         } else {
-            Err(Error::from(ErrorKind::InvalidAddress(guest_addr)))
+            Err(Error::InvalidAddress(guest_addr))
         }
     }
 

@@ -4,7 +4,7 @@ use std::iter;
 
 use crate::memory::GuestRam;
 use crate::virtio::PciIrq;
-use crate::vm::Result;
+use crate::system::Result;
 
 const APIC_DEFAULT_PHYS_BASE: u32 = 0xfee00000;
 const IO_APIC_DEFAULT_PHYS_BASE: u32 = 0xfec00000;
@@ -99,7 +99,7 @@ impl Buffer {
             .w8(dstirq)            // dest irq
     }
 
-    fn write_all_mpc_intsrc(&mut self, ioapicid: u8, pci_irqs: &Vec<PciIrq>) -> &mut Self {
+    fn write_all_mpc_intsrc(&mut self, ioapicid: u8, pci_irqs: &[PciIrq]) -> &mut Self {
         for irq in pci_irqs {
             self.write_mpc_intsrc(ioapicid, irq.src_bus_irq(), irq.irq_line());
         }
@@ -192,9 +192,8 @@ fn align(sz: usize, n: usize) -> usize {
     (sz + (n - 1)) & !(n - 1)
 }
 
-pub fn setup_mptable(memory: &GuestRam, ncpus: usize, pci_irqs: Vec<PciIrq>) -> Result<()> {
+pub fn setup_mptable(memory: &GuestRam, ncpus: usize, pci_irqs: &[PciIrq]) -> Result<()> {
     let ioapicid = (ncpus + 1) as u8;
-    //let address= align(BIOS_BEGIN as usize + BIOS_BIN.len(), 16) as u32;
     let mut body = Buffer::new();
     let address = 0;
 
@@ -209,6 +208,5 @@ pub fn setup_mptable(memory: &GuestRam, ncpus: usize, pci_irqs: Vec<PciIrq>) -> 
 
     let mut table = Buffer::new();
     table.write_mpctable(ncpus as u16, &body);
-    //memory.write_bytes(address as u64, &table.vec)
     memory.write_bytes(address as u64, &table.vec)
 }

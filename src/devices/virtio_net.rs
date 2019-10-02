@@ -1,6 +1,6 @@
-use crate::virtio::{VirtioDeviceOps, VirtQueue, VirtioBus};
+use crate::virtio::{VirtioDeviceOps, VirtQueue, VirtioBus, Chain};
 use crate::memory::MemoryManager;
-use crate::{vm, system};
+use crate::{system, virtio};
 use std::sync::{RwLock, Arc};
 use std::{fmt, result, thread, io};
 use crate::system::{EPoll,Event};
@@ -15,7 +15,7 @@ const MAC_ADDR_LEN: usize = 6;
 pub enum Error {
     ChainWrite(io::Error),
     ChainRead(io::Error),
-    ChainIoEvent(vm::Error),
+    ChainIoEvent(system::Error),
     SetupPoll(system::Error),
     TapRead(io::Error),
     TapWrite(io::Error),
@@ -42,35 +42,41 @@ type Result<T> = result::Result<T, Error>;
 const VIRTIO_NET_F_CSUM: u64 = 1;
 const VIRTIO_NET_F_GUEST_CSUM: u64 = 1 << 1;
 const VIRTIO_NET_F_GUEST_TSO4: u64 = 1 << 7;
-const VIRTIO_NET_F_GUEST_UFO: u64 = 1 << 10;
+const VIRTIO_NET_F_GUEST_TSO6: u64 = 1 << 8;
+const VIRTIO_NET_F_GUEST_ECN : u64 = 1 << 9;
 const VIRTIO_NET_F_HOST_TSO4: u64 = 1 << 11;
-const VIRTIO_NET_F_HOST_UFO: u64 = 1 << 14;
+const VIRTIO_NET_F_HOST_TSO6: u64 = 1 << 12;
+const VIRTIO_NET_F_HOST_ECN: u64 = 1 << 13;
 
-//const VIRTIO_NET_HDR_SIZE: i32 = 12;
+const VIRTIO_NET_HDR_SIZE: i32 = 12;
 
 pub struct VirtioNet {
+    _features_supported: u64,
     tap: Option<Tap>,
 }
 
 impl VirtioNet {
-    fn new(tap: Tap) -> Self {
+    fn new(tap: Tap, features_supported: u64) -> Self {
         VirtioNet{
+            _features_supported: features_supported,
             tap: Some(tap)
         }
     }
 
-    pub fn create(vbus: &mut VirtioBus, tap: Tap) -> vm::Result<()> {
-        tap.set_offload(TUN_F_CSUM | TUN_F_UFO | TUN_F_TSO4 | TUN_F_TSO6).unwrap();
-        tap.set_vnet_hdr_size(12).unwrap();
-        let dev = Arc::new(RwLock::new(VirtioNet::new(tap)));
+    pub fn create(vbus: &mut VirtioBus, tap: Tap) -> virtio::Result<()> {
+        tap.set_offload(TUN_F_CSUM | TUN_F_TSO4 | TUN_F_TSO6| TUN_F_TSO_ECN).unwrap();
+        tap.set_vnet_hdr_size(VIRTIO_NET_HDR_SIZE).unwrap();
         let feature_bits =
                 VIRTIO_NET_F_CSUM |
                 VIRTIO_NET_F_GUEST_CSUM |
                 VIRTIO_NET_F_GUEST_TSO4 |
-                VIRTIO_NET_F_GUEST_UFO |
+                VIRTIO_NET_F_GUEST_TSO6 |
+                VIRTIO_NET_F_GUEST_ECN |
                 VIRTIO_NET_F_HOST_TSO4 |
-                VIRTIO_NET_F_HOST_UFO;
+                VIRTIO_NET_F_HOST_TSO6 |
+                VIRTIO_NET_F_HOST_ECN;
 
+        let dev = Arc::new(RwLock::new(VirtioNet::new(tap, feature_bits)));
         vbus.new_virtio_device(VIRTIO_ID_NET, dev)
             .set_queue_sizes(&[256, 256])
             .set_config_size(MAC_ADDR_LEN)
@@ -82,7 +88,7 @@ impl VirtioNet {
 pub const TUN_F_CSUM: u32 = 1;
 pub const TUN_F_TSO4: u32 = 2;
 pub const TUN_F_TSO6: u32 = 4;
-pub const TUN_F_UFO:  u32= 16;
+pub const TUN_F_TSO_ECN: u32 = 8;
 
 impl VirtioDeviceOps for VirtioNet {
     fn start(&mut self, _memory: &MemoryManager, mut queues: Vec<VirtQueue>) {
@@ -170,8 +176,6 @@ impl VirtioNetDevice {
                 self.tap.write_all(&self.tx_frame[..n])
                     .map_err(Error::TapWrite)?;
             }
-
-            chain.skip_readable();
             chain.flush_chain()
         }
         Ok(())
@@ -181,17 +185,15 @@ impl VirtioNetDevice {
         self.rx_bytes != 0
     }
 
-    fn receive_frame(&mut self) -> Result<bool> {
-        if let Some(mut chain) = self.rx.next_chain() {
+    fn receive_frame(&mut self, chain: &mut Chain) -> Result<bool> {
+        if chain.remaining_write() < self.rx_bytes {
+            notify!("not enough space for frame");
+            Ok(false)
+        } else {
             chain.write_all(&self.rx_frame[..self.rx_bytes])
                 .map_err(Error::ChainWrite)?;
             self.rx_bytes = 0;
-            // XXX defer interrupt
-            chain.flush_chain();
             Ok(true)
-        } else {
-            self.disable_tap_events();
-            Ok(false)
         }
     }
 
@@ -202,7 +204,6 @@ impl VirtioNetDevice {
                 Ok(true)
             },
             Err(e) => if let Some(libc::EAGAIN) = e.raw_os_error() {
-                // handle deferred interrupts
                 Ok(false)
             } else {
                 Err(Error::TapRead(e))
@@ -210,16 +211,40 @@ impl VirtioNetDevice {
         }
     }
 
+    fn next_rx_chain(&mut self) -> Option<Chain> {
+        self.rx.next_chain().or_else(|| {
+            self.disable_tap_events();
+            None
+        })
+    }
+
     fn handle_rx_tap(&mut self) -> Result<()> {
+        // tap wants to send packets to guest, is an rx chain available?
+        let mut chain = match self.next_rx_chain() {
+            Some(chain) => chain,
+            None => return Ok(()),
+        };
+
+        // If there is already an rx packet pending to send to guest
+        // first write it to rx chain.
         if self.pending_rx() {
-            if !self.receive_frame()? {
+            if !self.receive_frame(&mut chain)? {
                 return Ok(())
             }
         }
 
         while self.tap_read()? {
-            if !self.receive_frame()? {
-                break;
+            if chain.remaining_write() < self.rx_bytes {
+                // chain is full but there is still data to deliver,
+                // see if there is another rx chain available.
+                chain = match self.rx.next_chain() {
+                    Some(chain) => chain,
+                    None => return Ok(()),
+                };
+            }
+
+            if !self.receive_frame(&mut chain)? {
+                return Ok(());
             }
         }
         Ok(())
@@ -227,10 +252,12 @@ impl VirtioNetDevice {
 
     fn handle_rx_queue(&mut self) -> Result<()> {
         self.rx.ioevent().read().unwrap();
+        if !self.tap_event_enabled {
+            self.enable_tap_poll();
+        }
+
         if self.pending_rx() {
-            if self.receive_frame()? {
-                self.enable_tap_poll();
-            }
+            self.handle_rx_tap()?;
         }
         Ok(())
     }

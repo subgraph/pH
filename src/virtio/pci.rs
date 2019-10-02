@@ -2,7 +2,7 @@ use std::sync::{Arc,RwLock};
 use byteorder::{ByteOrder,LittleEndian};
 
 use crate::vm::io::{IoDispatcher,IoPortOps};
-use crate::memory::PCI_MMIO_RESERVED_BASE;
+use crate::vm::arch::PCI_MMIO_RESERVED_BASE;
 use crate::memory::AddressRange;
 use super::consts::*;
 

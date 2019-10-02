@@ -4,13 +4,13 @@ use std::os::unix::io::AsRawFd;
 
 use crate::memory::GuestRam;
 use crate::kvm::Kvm;
-use crate::vm::Result;
-
-use super::eventfd::{EventFd,IoEventFd};
+use crate::virtio::{Result,Error};
+use crate::system::EventFd;
+use crate::kvm::IoEventFd;
 use super::consts::*;
 use super::vring::{Vring,Descriptor};
 use super::bus::VirtioDeviceConfig;
-use super::chain::Chain;
+use crate::virtio::chain::Chain;
 
 #[derive(Clone)]
 pub struct VirtQueue {
@@ -51,7 +51,8 @@ impl VirtQueue {
 
     pub fn wait_ready(&self) -> Result<()> {
         if self.vring.is_empty() {
-            let _ = self.ioeventfd.read()?;
+            let _ = self.ioeventfd.read()
+                .map_err(Error::ReadIoEventFd)?;
         }
         Ok(())
     }
@@ -129,11 +130,11 @@ pub struct QueueIter {
 }
 
 impl Iterator for QueueIter {
-    type Item =  Chain;
+    type Item = Chain;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.vq.pop_avail_entry().map(|idx| {
-            Chain::new(self.vq.memory.clone(),self.vq.clone(),idx, self.vq.vring.size())
+            Chain::new(self.vq.memory.clone(), self.vq.clone(), idx, self.vq.vring.size())
         })
     }
 }
@@ -150,8 +151,9 @@ impl InterruptLine {
     }
 
     fn new(kvm: &Kvm, irq: u8) -> Result<Arc<InterruptLine>> {
-        let irqfd = EventFd::new()?;
-        kvm.irqfd(irqfd.as_raw_fd() as u32, irq as u32)?;
+        let irqfd = EventFd::new().map_err(Error::CreateEventFd)?;
+        kvm.irqfd(irqfd.as_raw_fd() as u32, irq as u32)
+            .map_err(Error::IrqFd)?;
         Ok(Arc::new(InterruptLine{
             irqfd,
             isr: AtomicUsize::new(0)

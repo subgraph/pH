@@ -4,8 +4,7 @@ use std::thread;
 use std::path::{PathBuf, Path};
 
 use crate::memory::{GuestRam, MemoryManager};
-use crate::virtio::{self,VirtioBus,VirtioDeviceOps, VirtQueue};
-use crate::vm::Result;
+use crate::virtio::{self,VirtioBus,VirtioDeviceOps, VirtQueue, Result};
 use crate::devices::virtio_9p::server::Server;
 use crate::devices::virtio_9p::filesystem::{FileSystem, FileSystemOps};
 use self::pdu::PduParser;

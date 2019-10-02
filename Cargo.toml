@@ -1,5 +1,5 @@
 [package]
-name = "pH"
+name = "ph"
 version = "0.1.0"
 authors = ["Bruce Leidl <bruce@subgraph.com>"]
 edition = "2018"
@@ -9,4 +9,5 @@ byteorder="1.0.0"
 libc = "*"
 termios = "0.2.2"
 lazy_static = "1.4.0"
+signal-hook = "0.1.10"
 libcitadel = { git = "https://github.com/brl/citadel-tools", rev="44d5ce660f1f5cf8a3ad1060b143926a99be5148" }

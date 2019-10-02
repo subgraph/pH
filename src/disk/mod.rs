@@ -23,6 +23,7 @@ pub enum OpenType {
 }
 
 pub trait DiskImage: Sync+Send {
+    fn open(&mut self) -> Result<()>;
     fn read_only(&self) -> bool;
     fn sector_count(&self) -> u64;
     fn disk_file(&mut self) -> Result<&mut File>;
@@ -61,6 +62,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     ReadOnly,
+    ImageDoesntExit(PathBuf),
     DiskOpen(PathBuf,io::Error),
     DiskOpenTooShort(PathBuf),
     DiskRead(io::Error),
@@ -78,6 +80,7 @@ impl fmt::Display for Error {
         use Error::*;
         match self {
             ReadOnly => write!(f, "attempted write to read-only device"),
+            ImageDoesntExit(path) => write!(f, "disk image {} does not exist", path.display()),
             DiskOpen(path, err) => write!(f, "failed to open disk image {}: {}", path.display(), err),
             DiskOpenTooShort(path) => write!(f, "failed to open disk image {} because file is too short", path.display()),
             DiskRead(err) => write!(f, "error reading from disk image: {}", err),

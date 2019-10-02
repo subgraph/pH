@@ -13,8 +13,16 @@ impl Error {
         Error(e)
     }
 
+    pub fn errno(self) -> i32 {
+        self.0
+    }
+
     pub fn last_os_error() -> Error {
-        Error(unsafe { *__errno_location() })
+        Error(Self::last_errno())
+    }
+
+    pub fn last_errno() -> i32 {
+        unsafe { *__errno_location() }
     }
 
     pub fn is_interrupted(&self) -> bool {
@@ -40,10 +48,6 @@ impl From<Error> for io::Error {
     fn from(err: Error) -> io::Error {
         io::Error::from_raw_os_error(err.0)
     }
-}
-
-pub fn errno_result<T>() -> Result<T> {
-    Err(Error::last_os_error())
 }
 
 pub fn cvt<T: IsMinusOne>(t: T) -> Result<T> {

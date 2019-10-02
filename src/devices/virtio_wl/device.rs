@@ -2,10 +2,10 @@ use std::os::unix::io::{AsRawFd,RawFd};
 use std::sync::{RwLock, Arc};
 use std::thread;
 
-use crate::{vm, system};
-use crate::system::EPoll;
+use crate::{system, virtio};
+use crate::system::{EPoll,EventFd};
 use crate::memory::{MemoryManager, DrmDescriptor};
-use crate::virtio::{VirtQueue, EventFd, Chain, VirtioBus, VirtioDeviceOps};
+use crate::virtio::{VirtQueue, VirtioBus, VirtioDeviceOps, Chain};
 
 use crate::devices::virtio_wl::{vfd::VfdManager, consts::*, Error, Result, VfdObject};
 use crate::system::ioctl::ioctl_with_ref;
@@ -27,7 +27,7 @@ impl VirtioWayland {
         VirtioWayland { feature_bits: 0 }
     }
 
-    pub fn create(vbus: &mut VirtioBus) -> vm::Result<()> {
+    pub fn create(vbus: &mut VirtioBus) -> virtio::Result<()> {
         let dev = Arc::new(RwLock::new(VirtioWayland::new()));
         vbus.new_virtio_device(VIRTIO_ID_WL, dev)
             .set_num_queues(2)
@@ -40,7 +40,7 @@ impl VirtioWayland {
     }
 
     fn create_device(memory: MemoryManager, in_vq: VirtQueue, out_vq: VirtQueue, transition: bool) -> Result<WaylandDevice> {
-        let kill_evt = EventFd::new().map_err(Error::IoEventError)?;
+        let kill_evt = EventFd::new().map_err(Error::EventFdCreate)?;
         let dev = WaylandDevice::new(memory, in_vq, out_vq, kill_evt, transition)?;
         Ok(dev)
     }

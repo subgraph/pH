@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Write, Read, SeekFrom, Seek};
 use crate::disk::Error::DiskRead;
 use crate::disk::memory::MemoryOverlay;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 
 
 pub struct RawDiskImage {
@@ -17,32 +17,43 @@ pub struct RawDiskImage {
 }
 
 impl RawDiskImage {
-    pub fn new<P: Into<PathBuf>>(path: P, open_type: OpenType) -> Self {
+    fn get_nsectors(path: &Path, offset: usize) -> Result<u64> {
+        if let Ok(meta) = path.metadata() {
+            Ok((meta.len() - offset as u64) / SECTOR_SIZE as u64)
+        } else {
+            Err(Error::ImageDoesntExit(path.to_path_buf()))
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn new<P: Into<PathBuf>>(path: P, open_type: OpenType) -> Result<Self> {
         Self::new_with_offset(path, open_type, 0)
     }
 
-    pub fn new_with_offset<P: Into<PathBuf>>(path: P, open_type: OpenType, offset: usize) -> Self {
+    pub fn new_with_offset<P: Into<PathBuf>>(path: P, open_type: OpenType, offset: usize) -> Result<Self> {
         let path = path.into();
-        RawDiskImage {
+        let nsectors = Self::get_nsectors(&path, offset)?;
+        Ok(RawDiskImage {
             path,
             open_type,
             file: None,
             offset,
-            nsectors: 0,
+            nsectors,
             disk_image_id: Vec::new(),
             overlay: None,
-        }
+        })
     }
 
-    pub fn open(&mut self) -> Result<()> {
+}
+
+impl DiskImage for RawDiskImage {
+    fn open(&mut self) -> Result<()> {
         let meta = self.path.metadata()
             .map_err(|e| Error::DiskOpen(self.path.clone(), e))?;
 
         if meta.len() < self.offset as u64 {
             return Err(Error::DiskOpenTooShort(self.path.clone()))
         }
-
-        self.nsectors = (meta.len() - self.offset as u64) / SECTOR_SIZE as u64;
 
         let file = OpenOptions::new()
             .read(true)
@@ -59,9 +70,7 @@ impl RawDiskImage {
         }
         Ok(())
     }
-}
 
-impl DiskImage for RawDiskImage {
     fn read_only(&self) -> bool {
         self.open_type == OpenType::ReadOnly
     }

@@ -5,6 +5,7 @@ use crate::memory::Mapping;
 use super::Result;
 use super::io::IoDispatcher;
 use std::sync::atomic::{AtomicBool, Ordering};
+use crate::vm::Error;
 
 const KVM_EXIT_UNKNOWN:u32 = 0;
 const KVM_EXIT_IO:u32 = 2;
@@ -37,8 +38,8 @@ pub struct MmioExitData {
 
 impl KvmRunArea {
     pub fn new(vcpu: KvmVcpu, shutdown: Arc<AtomicBool>, io_dispatcher: Arc<IoDispatcher>) -> Result<KvmRunArea> {
-        let size = vcpu.get_vcpu_mmap_size()?;
-        let mapping = Mapping::new_from_fd(vcpu.raw_fd(), size)?;
+        let size = vcpu.get_vcpu_mmap_size().map_err(Error::CreateVmFailed)?;
+        let mapping = Mapping::new_from_fd(vcpu.raw_fd(), size).map_err(Error::MappingFailed)?;
         Ok(KvmRunArea{
             vcpu,
             io: io_dispatcher,
@@ -120,7 +121,6 @@ impl KvmRunArea {
                 let sub = self.suberror();
                 println!("internal error: {}", sub);
                 println!("{:?}", self.vcpu.get_regs().unwrap());
-                println!("{:?}", self.vcpu.get_sregs().unwrap());
             }
             n => { println!("unhandled exit: {}", n);},
         }
@@ -128,15 +128,6 @@ impl KvmRunArea {
 
     fn handle_shutdown(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
-    }
-
-    fn _handle_problem(&mut self) {
-        let regs = self.vcpu.get_regs().unwrap();
-        let sregs = self.vcpu.get_sregs().unwrap();
-        println!("REGS:\n{:?}", regs);
-        println!("SREGS:\n{:?}", sregs);
-        panic!(":(");
-
     }
 
     fn handle_exit_io(&mut self) {

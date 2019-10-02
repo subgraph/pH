@@ -8,30 +8,24 @@ mod allocator;
 pub use self::allocator::SystemAllocator;
 pub use self::address::AddressRange;
 pub use self::mmap::Mapping;
-pub use self::ram::GuestRam;
-pub use self::ram::{PCI_MMIO_RESERVED_BASE,HIMEM_BASE};
+pub use self::ram::{GuestRam,MemoryRegion};
 pub use manager::MemoryManager;
 
 pub use drm::{DrmDescriptor,DrmPlaneDescriptor};
 
-use crate::vm::Error as VmError;
 use std::{result, fmt, io};
-use crate::system;
-
-pub const KVM_KERNEL_LOAD_ADDRESS: u64 = 0x1000000;
-pub const KERNEL_CMDLINE_ADDRESS: u64 = 0x20000;
-pub const KERNEL_ZERO_PAGE: u64 = 0x7000;
+use crate::{system, kvm};
 
 #[derive(Debug)]
 pub enum Error {
     DeviceMemoryAllocFailed,
-    MappingFailed(VmError),
-    RegisterMemoryFailed(VmError),
-    UnregisterMemoryFailed(VmError),
+    MappingFailed(system::Error),
+    RegisterMemoryFailed(kvm::Error),
+    UnregisterMemoryFailed(kvm::Error),
     GbmCreateDevice(system::Error),
     GbmCreateBuffer(system::Error),
     OpenRenderNode(io::Error),
-    PrimeHandleToFD(system::Error),
+    PrimeHandleToFD(system::ErrnoError),
     CreateBuffer(io::Error),
     NoDrmAllocator,
 }

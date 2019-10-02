@@ -1,13 +1,12 @@
 use crate::memory::GuestRam;
 use std::sync::Arc;
 
-use crate::vm::Result;
-
 use super::VirtQueue;
-use super::eventfd::IoEventFd;
 use super::vring::Vring;
 use super::virtqueue::InterruptLine;
 use super::bus::VirtioDeviceConfig;
+use crate::virtio::{Result, Error};
+use crate::kvm::IoEventFd;
 
 ///
 /// Manages a set of virtqueues during device intitialization.
@@ -116,7 +115,8 @@ fn create_ioeventfds(conf: &VirtioDeviceConfig) -> Result<Vec<Arc<IoEventFd>>> {
     let notify_base = conf.notify_mmio().base();
 
     for i in 0..conf.num_queues() {
-        let evt = IoEventFd::new(conf.kvm(), notify_base + (4 * i as u64))?;
+        let evt = IoEventFd::new(conf.kvm(), notify_base + (4 * i as u64))
+            .map_err(Error::CreateIoEventFd)?;
         v.push(Arc::new(evt));
     }
     Ok(v)

@@ -5,7 +5,7 @@ use std::mem;
 use std::io::Write;
 use std::os::unix::io::RawFd;
 
-use crate::vm::{Result,Error,ErrorKind};
+use crate::system::{Result,Error};
 
 pub struct Mapping {
     ptr: *mut u8,
@@ -65,7 +65,7 @@ impl Mapping {
     ///
     fn check_offset(&self, offset: usize) -> Result<()> {
         if offset > self.size {
-            Err(Error::from(ErrorKind::InvalidMappingOffset(offset)))
+            Err(Error::InvalidOffset)
         } else {
             Ok(())
         }
@@ -105,7 +105,7 @@ impl Mapping {
         self.check_offset(offset + bytes.len())?;
         unsafe {
             let mut slice: &mut [u8] = &mut self.as_mut_slice()[offset..];
-            slice.write_all(bytes).map_err(|_| Error::from(ErrorKind::InvalidMappingOffset(offset)))
+            slice.write_all(bytes).map_err(|_| Error::InvalidOffset)
         }
     }
 
@@ -138,7 +138,7 @@ impl Mapping {
     pub fn set_mergeable(&self) -> Result<()> {
         unsafe {
             if libc::madvise(self.ptr as *mut libc::c_void, self.size, libc::MADV_MERGEABLE) == -1 {
-                return Err(Error::from_last_errno());
+                return Err(Error::last_os_error());
             }
         }
         Ok(())
@@ -166,7 +166,7 @@ unsafe fn mmap_allocate(size: usize, flags: libc::c_int, fd: libc::c_int) -> Res
                     flags, fd, 0);
 
     if p.is_null() || p == libc::MAP_FAILED {
-        return Err(Error::from_last_errno());
+        return Err(Error::last_os_error());
     }
     Ok(p as *mut u8)
 }

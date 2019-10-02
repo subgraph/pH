@@ -7,7 +7,7 @@ use std::io::{self, Read};
 use crate::memory::GuestRam;
 use super::consts::*;
 
-use crate::vm::{Result,Error,ErrorKind};
+use crate::virtio::{Result,Error};
 
 ///
 /// A convenience wrapper around `AtomicUsize`
@@ -275,25 +275,21 @@ impl Vring {
     }
 
     pub fn validate(&self) -> Result<()> {
-        fn vring_err<T: ToString>(msg: T) -> Result<()> {
-            Err(Error::new(ErrorKind::InvalidVring, msg.to_string()))
-        }
-
         if !self.enabled {
-            return vring_err("vring is not enabled");
+            return Err(Error::VringNotEnabled);
         }
         let qsz = self.queue_size as usize;
         let desc_table_sz = 16 * qsz;
         let avail_ring_sz = 6 + 2 * qsz;
         let used_ring_sz = 6 + 8 * qsz;
         if !self.memory.is_valid_range(self.descriptors, desc_table_sz) {
-            return vring_err(format!("descriptor table range is invalid 0x{:x}", self.descriptors));
+            return Err(Error::VringRangeInvalid(self.descriptors));
         }
         if !self.memory.is_valid_range(self.avail_ring, avail_ring_sz) {
-            return vring_err(format!("avail ring range is invalid 0x{:x}", self.avail_ring));
+            return Err(Error::VringAvailInvalid(self.avail_ring));
         }
         if !self.memory.is_valid_range(self.used_ring, used_ring_sz) {
-            return vring_err(format!("used ring range is invalid 0x{:x}", self.used_ring));
+            return Err(Error::VringUsedInvalid(self.used_ring));
         }
         Ok(())
     }

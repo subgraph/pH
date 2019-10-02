@@ -1,7 +1,7 @@
 use std::os::unix::io::RawFd;
 use std::{result, io, fmt};
 
-use crate::{vm, system};
+use crate::system;
 use crate::memory::Error as MemError;
 use crate::system::FileDesc;
 
@@ -82,13 +82,14 @@ pub trait VfdObject {
 
 #[derive(Debug)]
 pub enum Error {
-    IoEventError(vm::Error),
+    IoEventError(system::Error),
+    EventFdCreate(system::Error),
     ChainIoError(io::Error),
     UnexpectedCommand(u32),
     ShmAllocFailed(system::Error),
     RegisterMemoryFailed(MemError),
     CreatePipesFailed(system::Error),
-    SocketReceive(system::Error),
+    SocketReceive(system::ErrnoError),
     SocketConnect(io::Error),
     PipeReceive(io::Error),
     SendVfd(io::Error),
@@ -96,7 +97,7 @@ pub enum Error {
     TooManySendVfds(usize),
     FailedPollContextCreate(system::Error),
     FailedPollAdd(system::Error),
-    DmaSync(system::Error),
+    DmaSync(system::ErrnoError),
     DmaBuf(MemError),
     DmaBufSize(system::Error),
 }
@@ -106,6 +107,7 @@ impl fmt::Display for Error {
         use Error::*;
         match self {
             IoEventError(e) => write!(f, "error reading from ioevent fd: {}", e),
+            EventFdCreate(e) => write!(f, "error creating eventfd: {}", e),
             ChainIoError(e) => write!(f, "i/o error on virtio chain operation: {}", e),
             UnexpectedCommand(cmd) => write!(f, "unexpected virtio wayland command: {}", cmd),
             ShmAllocFailed(e) => write!(f, "failed to allocate shared memory: {}", e),

@@ -2,7 +2,7 @@ use std::ffi::CString;
 use std::io::SeekFrom;
 use std::os::unix::io::{RawFd,AsRawFd};
 
-use crate::system::{Result, FileDesc, errno_result};
+use crate::system::{Error,Result, FileDesc};
 
 use libc::{
     self, c_char, c_uint, c_int, c_long,SYS_memfd_create,
@@ -52,7 +52,7 @@ impl MemoryFd {
         let name = name.as_ptr() as *const c_char;
         let fd = unsafe { libc::syscall(SYS_memfd_create as c_long, name, flags) } as c_int;
         if fd < 0 {
-            errno_result()
+            Err(Error::last_os_error())
         } else {
             Ok(FileDesc::new(fd))
         }
@@ -61,7 +61,7 @@ impl MemoryFd {
     fn add_seals(&self, flags: c_int) -> Result<()> {
         let ret = unsafe { libc::fcntl(self.fd.as_raw_fd(), libc::F_ADD_SEALS, flags) };
         if ret < 0 {
-            errno_result()
+            Err(Error::last_os_error())
         } else {
             Ok(())
         }

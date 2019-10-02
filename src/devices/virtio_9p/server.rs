@@ -664,7 +664,7 @@ impl <T: FileSystemOps> Server<T> {
             if n == 0 {
                 break;
             }
-            pp.chain.inc_offset(n, true);
+            pp.chain.inc_write_offset(n);
             nread += n as u32;
         }
         pp.w32_at(0, nread as u32);
@@ -692,7 +692,7 @@ impl <T: FileSystemOps> Server<T> {
             if n == 0 {
                 break;
             }
-            pp.chain.inc_offset(n, false);
+            pp.chain.inc_read_offset(n);
             nread += n as u32;
         }
         pp.read_done()?;

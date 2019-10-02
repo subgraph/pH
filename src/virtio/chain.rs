@@ -1,291 +1,312 @@
-
+use std::fmt;
 use std::io::{self,Read,Write};
 
 use crate::memory::GuestRam;
-use super::VirtQueue;
-use super::vring::Descriptor;
-use byteorder::{WriteBytesExt, LittleEndian, ReadBytesExt};
+use crate::virtio::VirtQueue;
+use crate::virtio::vring::Descriptor;
 
-pub struct Chain {
-
+struct DescriptorList {
     memory: GuestRam,
-
-    vq: VirtQueue,
-
-    /// Number of remaining descriptors allowed in this chain.
-    ttl: u16,
-
-    /// Current descriptor or `None` if at end of chain
-    current: Option<Descriptor>,
-
-    /// Offset for read/write into current descriptor
+    descriptors: Vec<Descriptor>,
     offset: usize,
-
-    /// Saved head index to place in used ring.  Set to `None`
-    /// after writing to used ring.
-    head_idx: Option<u16>,
-
-    /// Number of bytes written into writeable descriptors
-    /// in this chain. Will be written into used ring later.
-    wlen: usize,
+    total_size: usize,
+    consumed_size: usize,
 }
 
-
-impl Chain {
-    pub fn new(memory: GuestRam, vq: VirtQueue, head: u16, ttl: u16) -> Chain {
-        let first = vq.load_descriptor(head);
-        Chain {
+impl DescriptorList {
+    fn new(memory: GuestRam) -> Self {
+        DescriptorList {
             memory,
-            vq, ttl, head_idx: Some(head),
-            current: first,
-            offset: 0, wlen: 0,
+            descriptors: Vec::new(),
+            offset: 0,
+            total_size: 0,
+            consumed_size: 0,
         }
     }
 
-    /// Applies a function to the current descriptor (if `Some`) or
-    /// returns default parameter `d` (if `None`).
-    pub fn with_current_descriptor<U,F>(&self, d: U, f: F) -> U
-        where F: FnOnce(&Descriptor) -> U {
-        match self.current {
-            Some(ref desc) => f(desc),
-            None => d,
-        }
+    fn add_descriptor(&mut self, d: Descriptor) {
+        self.total_size += d.len as usize;
+        self.descriptors.push(d)
     }
 
-    /// Load and return next descriptor from chain.
-    ///
-    /// If `self.current`
-    ///
-    ///   1) holds a descriptor (`self.current.is_some()`)
-    ///   2) that descriptor has a next field (`desc.has_next()`)
-    ///   3) time-to-live is not zero (`self.ttl > 0`)
-    ///
-    /// then load and return the descriptor pointed to by the current
-    /// descriptor. Returns `None` otherwise.
-    ///
-    fn next_desc(&self) -> Option<Descriptor> {
-        self.with_current_descriptor(None, |desc| {
-            if desc.has_next() && self.ttl > 0 {
-               self.vq.load_descriptor(desc.next)
+    fn reverse(&mut self) {
+        self.descriptors.reverse();
+    }
+
+    fn clear(&mut self) {
+        self.descriptors.clear();
+        self.offset = 0;
+    }
+
+    fn is_empty(&self) -> bool {
+        self.descriptors.is_empty()
+    }
+
+    fn current(&self) -> Option<&Descriptor> {
+        self.descriptors.last()
+    }
+
+    fn current_address(&self, size: usize) -> Option<u64> {
+        self.current().and_then(|d| {
+            if d.remaining(self.offset) >= size {
+                Some(d.addr + self.offset as u64)
             } else {
                 None
             }
         })
     }
 
-    /// Load next descriptor in chain into `self.current`.
-    ///
-    /// Set `self.current` to the next descriptor in chain or `None` if
-    /// at end of chain.
-    ///
-    pub fn load_next_descriptor(&mut self) {
-        self.current = self.next_desc();
-        // Only decrement ttl if a new descriptor was loaded
-        if self.current.is_some() {
-            self.ttl -= 1;
+    fn inc(&mut self, len: usize) {
+        let d = match self.current() {
+            Some(d) => d,
+            None => {
+                warn!("Virtqueue increment called with no current descriptor");
+                return;
+            }
+        };
+        let remaining = d.remaining(self.offset);
+        if len > remaining {
+            warn!("Virtqueue descriptor buffer increment exceeds current size");
         }
-        self.offset = 0;
-    }
-
-    ///
-    /// Return `true` if current descriptor exists and is readable, otherwise
-    /// `false`.
-    ///
-    pub fn is_current_readable(&self) -> bool {
-        self.with_current_descriptor(false, |desc| !desc.is_write())
-    }
-
-    ///
-    /// If `current` is a writeable descriptor, keep loading new descriptors until
-    /// a readable descriptor is found or end of chain is reached.  After this
-    /// call `current` will either be a readable descriptor or `None` if the
-    /// end of chain was reached.
-    ///
-    pub fn skip_readable(&mut self) {
-        while self.is_current_readable() {
-            self.load_next_descriptor();
+        if len >= remaining {
+            self.consumed_size += remaining;
+            self.offset = 0;
+            self.descriptors.pop();
+        } else {
+            self.consumed_size += len;
+            self.offset += len;
         }
     }
 
-    /// Return `true` if the end of the descriptor chain has been reached.
-    ///
-    /// When at end of chain `self.current` is `None`.
-    pub fn is_end_of_chain(&self) -> bool {
-        self.current.is_none()
+    fn read(&mut self, buf: &mut [u8]) -> usize {
+        if let Some(d) = self.current() {
+            let n = d.read_from(&self.memory, self.offset, buf);
+            self.inc(n);
+            return n;
+        }
+        0
     }
 
-    ///
-    /// Length field of current descriptor is returned or 0 if
-    /// at end of chain.
-    ///
-    fn current_size(&self) -> usize {
-        self.with_current_descriptor(0, |desc| desc.len as usize)
+    fn write(&mut self, buf: &[u8]) -> usize {
+        if let Some(d) = self.current() {
+            let n = d.write_to(&self.memory, self.offset, buf);
+            self.inc(n);
+            return n;
+        }
+        0
     }
 
-    ///
-    /// Increment `self.offset` with the number of bytes
-    /// read or written from `current` descriptor and
-    /// load next descriptor if `current` descriptor
-    /// has been fully consumed.
-    ///
-    fn _inc_offset(&mut self, sz: usize) {
-        self.offset += sz;
-        if self.offset >= self.current_size() {
-            self.load_next_descriptor();
+    fn write_from_reader<R>(&mut self, reader: R, size: usize) -> io::Result<usize>
+        where R: Read+Sized
+    {
+        if let Some(d) = self.current() {
+            let n = d.write_from_reader(&self.memory, self.offset, reader, size)?;
+            self.inc(n);
+            Ok(n)
+        } else {
+            Ok(0)
         }
     }
 
-    pub fn inc_offset(&mut self, sz: usize, write: bool) {
-        if write {
-            assert!(!self.is_current_readable());
-            self.wlen += sz;
-        }
-        self._inc_offset(sz)
-    }
-
-
-    ///
-    /// Read from the `current` readable descriptor and return
-    /// the number of bytes read.
-    ///
-    /// If this read exhausts the `current` descriptor then the
-    /// next descriptor in chain will be loaded into `current`.
-    ///
-    /// Assumes that current is a readable descriptor so caller must
-    /// call `self.is_current_readable()` before calling this.
-    ///
-    fn read_current(&mut self, bytes: &mut[u8]) -> usize {
-        assert!(self.is_current_readable());
-
-        let nread = self.with_current_descriptor(0, |desc| {
-            desc.read_from(&self.memory, self.offset, bytes)
-        });
-        self._inc_offset(nread);
-        nread
-    }
-
-    ///
-    /// Write into the `current` writeable descriptor if it exists
-    /// and return the number of bytes read or 0 if at end of chain.
-    ///
-    /// If this write exausts the `current` descriptor then the
-    /// next descriptor in chain will be loaded into `current`
-    ///
-    /// Assumes that `current` is a writeable descriptor or `None`
-    /// so caller must call `self.skip_readable()` before calling this.
-    ///
-    fn write_current(&mut self, bytes: &[u8]) -> usize {
-        assert!(!self.is_current_readable());
-        let sz = self.with_current_descriptor(0, |desc| {
-            desc.write_to(&self.memory, self.offset, bytes)
-        });
-        self._inc_offset(sz);
-        sz
-    }
-
-    ///
-    /// Write this chain head index (`self.head_idx`) and bytes written (`self.wlen`)
-    /// into used ring. Consumes `self.head_idx` so that used ring cannot
-    /// accidentally be written more than once.  Since we have returned this
-    /// chain to the guest, it is no longer valid to access any descriptors in
-    /// this chain so `self.current` is set to `None`.
-    ///
-    pub fn flush_chain(&mut self) {
-        match self.head_idx {
-            Some(idx) => self.vq.put_used(idx, self.wlen as u32),
-            None => (),
-        }
-        self.current = None;
-        self.head_idx = None;
-    }
-
-    pub fn current_write_address(&mut self, size: usize) -> Option<u64> {
-        self.skip_readable();
-        self.current_address(size)
-    }
-
-    pub fn current_address(&mut self, size: usize) -> Option<u64> {
-       self.with_current_descriptor(None, |desc| {
-           if desc.len as usize - self.offset < size {
-               None
-           } else {
-               Some(desc.addr + self.offset as u64)
-           }
-       })
-    }
-
-    pub fn get_wlen(&self) -> usize {
-        self.wlen
-    }
-
-    #[allow(dead_code)]
-    pub fn debug(&self) {
-        self.with_current_descriptor((), |desc| {
-            println!("offset: {} desc: {:?}", self.offset, desc);
-        });
-    }
-
-    pub fn copy_from_reader<R: Read+Sized>(&mut self, r: R, size: usize) -> io::Result<usize> {
-        self.skip_readable();
-        assert!(!self.is_current_readable());
-
-        let res = self.with_current_descriptor(Ok(0usize), |desc| {
-            desc.write_from_reader(&self.memory, self.offset,r, size)
-        });
-        if let Ok(nread) = res {
-            self._inc_offset(nread);
-            self.wlen += nread;
-        }
-        res
-    }
-
-    pub fn current_write_slice(&self) -> &mut [u8] {
-        match self.current {
-            Some(d) if d.is_write() && d.remaining(self.offset) > 0 => {
-                let size = d.remaining(self.offset);
-                self.memory.mut_slice(d.addr + self.offset as u64, size).unwrap_or(&mut [])
-            },
-            _ => &mut [],
+    fn current_slice(&self) -> &[u8] {
+        if let Some(d) = self.current() {
+            let size = d.remaining(self.offset);
+            let addr = d.addr + self.offset as u64;
+            self.memory.slice(addr, size).unwrap_or(&[])
+        } else {
+            &[]
         }
     }
-    pub fn current_read_slice(&self) -> &[u8] {
-        match self.current {
-            Some(d) if !d.is_write() && d.remaining(self.offset) > 0 => {
-                let size = d.remaining(self.offset);
-                self.memory.slice(d.addr + self.offset as u64, size).unwrap_or(&[])
-            },
-            _ => &[],
+
+    fn current_mut_slice(&self) -> &mut [u8] {
+        if let Some(d) = self.current() {
+            let size = d.remaining(self.offset);
+            let addr = d.addr + self.offset as u64;
+            self.memory.mut_slice(addr, size).unwrap_or(&mut [])
+        } else {
+            &mut []
         }
+    }
+
+    fn remaining(&self) -> usize {
+        self.total_size - self.consumed_size
+    }
+}
+
+impl fmt::Debug for DescriptorList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DList[size={}, [", self.total_size)?;
+        for d in self.descriptors.iter().rev() {
+            write!(f, "(#{}, 0x{:08x}, [{}]),", d.idx, d.addr, d.len)?;
+        }
+        write!(f, "]")
+    }
+}
+
+pub struct Chain {
+    head: Option<u16>,
+    vq: VirtQueue,
+    readable: DescriptorList,
+    writeable: DescriptorList,
+}
+
+impl Chain {
+    pub fn new(memory: GuestRam, vq: VirtQueue, head: u16, ttl: u16) -> Self {
+        let (readable,writeable) = Self::load_descriptors(memory, &vq, head, ttl);
+        Chain {
+            head: Some(head),
+            vq,
+            readable,
+            writeable,
+        }
+    }
+
+    fn load_descriptors(memory: GuestRam, vq: &VirtQueue, head: u16, ttl: u16) -> (DescriptorList, DescriptorList) {
+        let mut readable = DescriptorList::new(memory.clone());
+        let mut writeable = DescriptorList::new(memory);
+        let mut idx = head;
+        let mut ttl = ttl;
+
+        while let Some(d) = vq.load_descriptor(idx) {
+            if ttl == 0 {
+                warn!("Descriptor chain length exceeded ttl");
+                break;
+            } else {
+                ttl -= 1;
+            }
+
+            if d.is_write() {
+                writeable.add_descriptor(d);
+            } else {
+                if !writeable.is_empty() {
+                    warn!("Guest sent readable virtqueue descriptor after writeable descriptor in violation of specification");
+                }
+                readable.add_descriptor(d);
+            }
+            if !d.has_next() {
+                break;
+            }
+            idx = d.next;
+        }
+        readable.reverse();
+        writeable.reverse();
+        return (readable, writeable);
     }
 
     pub fn w8(&mut self, n: u8) -> io::Result<()> {
-        self.write_u8(n)
+        self.write_all(&[n])?;
+        Ok(())
     }
-
-    #[allow(unused)]
     pub fn w16(&mut self, n: u16) -> io::Result<()> {
-        self.write_u16::<LittleEndian>(n)
+        self.write_all(&n.to_le_bytes())?;
+        Ok(())
     }
-
     pub fn w32(&mut self, n: u32) -> io::Result<()> {
-        self.write_u32::<LittleEndian>(n)
+        self.write_all(&n.to_le_bytes())?;
+        Ok(())
     }
-
     pub fn w64(&mut self, n: u64) -> io::Result<()> {
-        self.write_u64::<LittleEndian>(n)
+        self.write_all(&n.to_le_bytes())?;
+        Ok(())
     }
 
-    #[allow(unused)]
     pub fn r16(&mut self) -> io::Result<u16> {
-        self.read_u16::<LittleEndian>()
+        let mut buf = [0u8; 2];
+        self.read_exact(&mut buf)?;
+        Ok(u16::from_le_bytes(buf))
     }
-
     pub fn r32(&mut self) -> io::Result<u32> {
-        self.read_u32::<LittleEndian>()
+        let mut buf = [0u8; 4];
+        self.read_exact(&mut buf)?;
+        Ok(u32::from_le_bytes(buf))
     }
 
     pub fn r64(&mut self) -> io::Result<u64> {
-        self.read_u64::<LittleEndian>()
+        let mut buf = [0u8; 8];
+        self.read_exact(&mut buf)?;
+        Ok(u64::from_le_bytes(buf))
+    }
+
+    pub fn flush_chain(&mut self) {
+        if let Some(head) = self.head.take() {
+            self.readable.clear();
+            self.writeable.clear();
+            self.vq.put_used(head, self.writeable.consumed_size as u32);
+        }
+    }
+
+    pub fn current_write_address(&mut self, size: usize) -> Option<u64> {
+        self.writeable.current_address(size)
+    }
+
+    pub fn remaining_read(&self) -> usize {
+        self.readable.remaining()
+    }
+
+    pub fn remaining_write(&self) -> usize {
+        self.writeable.remaining()
+    }
+
+    pub fn get_wlen(&self) -> usize {
+        self.writeable.consumed_size
+    }
+
+    pub fn is_end_of_chain(&self) -> bool {
+        self.readable.is_empty() && self.writeable.is_empty()
+    }
+
+    pub fn current_read_slice(&self) -> &[u8] {
+        self.readable.current_slice()
+    }
+
+    pub fn inc_read_offset(&mut self, sz: usize) {
+        self.readable.inc(sz);
+    }
+
+    pub fn inc_write_offset(&mut self, sz: usize) {
+        if !self.readable.is_empty() {
+            self.readable.clear();
+        }
+        self.writeable.inc(sz);
+    }
+
+    pub fn current_write_slice(&mut self) -> &mut [u8] {
+        self.writeable.current_mut_slice()
+    }
+
+    pub fn copy_from_reader<R>(&mut self, r: R, size: usize) -> io::Result<usize>
+    where R: Read+Sized
+    {
+        self.writeable.write_from_reader(r, size)
+    }
+}
+
+impl Read for Chain {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let mut nread = 0usize;
+        while nread < buf.len() {
+            nread += match self.readable.read(&mut buf[nread..]) {
+                0 => return Ok(nread),
+                n => n,
+            };
+        }
+        Ok(nread)
+    }
+}
+impl Write for Chain {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut nwrote = 0;
+        while nwrote < buf.len() {
+            match self.writeable.write(&buf[nwrote..]) {
+                0 => return Ok(nwrote),
+                n => nwrote += n,
+            };
+        }
+        Ok(nwrote)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -295,30 +316,8 @@ impl Drop for Chain {
     }
 }
 
-impl Read for Chain {
-    // nb: does not fail, but can read short
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let mut nread = 0usize;
-        while self.is_current_readable() && nread < buf.len() {
-            nread += self.read_current(&mut buf[nread..]);
-        }
-        Ok(nread)
-    }
-}
-
-impl Write for Chain {
-    // nb: does not fail, but can write short
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.skip_readable();
-        let mut nwrote = 0usize;
-        while !self.is_end_of_chain() && nwrote < buf.len() {
-            nwrote += self.write_current(&buf[nwrote..]);
-        }
-        self.wlen += nwrote;
-        Ok(nwrote)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+impl fmt::Debug for Chain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Chain {{ R {:?} W {:?} }}", self.readable, self.writeable)
     }
 }

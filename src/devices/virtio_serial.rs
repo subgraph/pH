@@ -3,9 +3,8 @@ use std::io::{self,Write,Read};
 use std::thread::spawn;
 use termios::*;
 
-use crate::virtio::{VirtioDeviceOps,VirtioBus, VirtQueue};
+use crate::virtio::{VirtioDeviceOps,VirtioBus, VirtQueue,Result};
 use crate::memory::MemoryManager;
-use crate::vm::Result;
 
 const VIRTIO_ID_CONSOLE: u16 = 3;
 

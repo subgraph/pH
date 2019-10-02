@@ -1,10 +1,11 @@
 use std::path::{PathBuf, Path};
-use crate::vm::Vm;
+use crate::vm::{VmSetup, arch};
 use std::{env, process};
 use crate::devices::SyntheticFS;
 use crate::disk::{RawDiskImage, RealmFSImage, OpenType};
 use libcitadel::Realms;
 use libcitadel::terminal::{TerminalPalette, AnsiTerminal, Base16Scheme};
+use crate::vm::arch::X86ArchSetup;
 
 pub struct VmConfig {
     ram_size: usize,
@@ -15,6 +16,7 @@ pub struct VmConfig {
     dmabuf: bool,
     network: bool,
     home: String,
+    colorscheme: String,
     bridge_name: String,
     kernel_path: Option<PathBuf>,
     init_path: Option<PathBuf>,
@@ -39,6 +41,7 @@ impl VmConfig {
             network: true,
             bridge_name: "vz-clear".to_string(),
             home: Self::default_homedir(),
+            colorscheme: "dracula".to_string(),
             kernel_path: None,
             init_path: None,
             init_cmd: None,
@@ -65,18 +68,23 @@ impl VmConfig {
         self
     }
 
-    pub fn raw_disk_image<P: Into<PathBuf>>(mut self, path: P, open_type: OpenType) -> Self {
-        self.raw_disks.push(RawDiskImage::new(path, open_type));
-        self
+    pub fn raw_disk_image<P: Into<PathBuf>>(self, path: P, open_type: OpenType) -> Self {
+        self.raw_disk_image_with_offset(path, open_type, 0)
     }
 
     pub fn raw_disk_image_with_offset<P: Into<PathBuf>>(mut self, path: P, open_type: OpenType, offset: usize) -> Self {
-        self.raw_disks.push(RawDiskImage::new_with_offset(path, open_type, offset));
+        match RawDiskImage::new_with_offset(path, open_type, offset) {
+            Ok(disk) => self.raw_disks.push(disk),
+            Err(e) => warn!("Could not add disk: {}", e),
+        };
         self
     }
 
     pub fn realmfs_image<P: Into<PathBuf>>(mut self, path: P) -> Self {
-        self.realmfs_images.push(RealmFSImage::new(path, OpenType::MemoryOverlay));
+        match RealmFSImage::new(path, OpenType::MemoryOverlay) {
+            Ok(disk) => self.realmfs_images.push(disk),
+            Err(e) => warn!("Could not add disk: {}", e),
+        };
         self
     }
 
@@ -109,19 +117,29 @@ impl VmConfig {
 
         let _terminal_restore = TerminalRestore::save();
 
-        if let Some(scheme) = Base16Scheme::by_name("black-metal-immortal") {
+        if let Some(scheme) = Base16Scheme::by_name(&self.colorscheme) {
             let mut term = AnsiTerminal::new().unwrap();
             if let Err(err) = term.apply_base16(scheme) {
                 warn!("Failed to set terminal color scheme: {}", err);
             }
         }
-
-        match Vm::open(self) {
-            Ok(vm) => if let Err(err) = vm.start() {
-                notify!("Error starting VM: {}", err);
+        let mut setup = self.setup();
+        let vm = match setup.create_vm() {
+            Ok(vm) => vm,
+            Err(err) => {
+                warn!("Failed to create VM: {}", err);
+                return;
             }
-            Err(e) => notify!("Error creating VM: {}", e),
+        };
+
+        if let Err(err) = vm.start() {
+            warn!("Failed to start VM: {}", err);
         }
+    }
+
+    pub fn setup(self) -> VmSetup<X86ArchSetup> {
+        let arch_setup = arch::create_setup(&self);
+        VmSetup::new(self, arch_setup)
     }
 
     pub fn ram_size(&self) -> usize {
@@ -206,7 +224,13 @@ impl VmConfig {
             eprintln!("Realmfs image does not exist at {}", path.display());
             process::exit(1);
         }
-        self.realmfs_images.push(RealmFSImage::new(path, OpenType::MemoryOverlay));
+        match RealmFSImage::new(path, OpenType::MemoryOverlay) {
+            Ok(disk) => self.realmfs_images.push(disk),
+            Err(e) => {
+                warn!("Could not add disk: {}", e);
+                process::exit(1);
+            },
+        };
     }
 
     fn add_realm_by_name(&mut self, realm: &str) {
@@ -217,7 +241,10 @@ impl VmConfig {
             self.add_realmfs_by_name(realmfs);
             self.home = realm.base_path().join("home").display().to_string();
             self.realm_name = Some(realm.name().to_string());
-            self.bridge_name = config.network_zone().to_string();
+            self.bridge_name = format!("vz-{}", config.network_zone());
+            if let Some(scheme) = config.terminal_scheme() {
+                self.colorscheme = scheme.to_string();
+            }
         }
     }
 
@@ -318,7 +345,6 @@ impl TerminalRestore {
             let _ = p.apply(&mut term);
         }
     }
-
 }
 
 impl Drop for TerminalRestore {

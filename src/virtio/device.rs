@@ -7,7 +7,7 @@ use super::VirtQueue;
 use super::config::VirtQueueConfig;
 use super::consts::*;
 use crate::vm::io::MmioOps;
-use crate::vm::Result;
+use crate::virtio::Result;
 
 pub trait VirtioDeviceOps: Send+Sync {
     fn reset(&mut self) {}

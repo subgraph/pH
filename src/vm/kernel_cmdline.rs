@@ -1,8 +1,6 @@
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 
-use crate::memory::{GuestRam,KERNEL_CMDLINE_ADDRESS};
-use super::Result;
 
 
 fn add_defaults(cmdline: &mut KernelCmdLine) {
@@ -30,13 +28,12 @@ fn add_defaults(cmdline: &mut KernelCmdLine) {
 
 
 pub struct KernelCmdLine {
-    address: u64,
     buffer: OsString,
 }
 
 impl KernelCmdLine {
     pub fn new() -> KernelCmdLine {
-        KernelCmdLine { address: KERNEL_CMDLINE_ADDRESS, buffer: OsString::new() }
+        KernelCmdLine { buffer: OsString::new() }
     }
 
     pub fn new_default() -> KernelCmdLine {
@@ -61,19 +58,11 @@ impl KernelCmdLine {
         self.push(&format!("{}={}", var, val))
     }
 
-    pub fn address(&self) -> u64 {
-        self.address
-    }
-
     pub fn size(&self) -> usize {
         (&self.buffer).as_bytes().len() + 1
     }
 
-    pub fn write_to_memory(&self, memory: &GuestRam) -> Result<()> {
-        let bs = self.buffer.as_bytes();
-        let len = bs.len();
-        memory.write_bytes(KERNEL_CMDLINE_ADDRESS, bs)?;
-        memory.write_int(KERNEL_CMDLINE_ADDRESS + len as u64, 0u8)?;
-        Ok(())
+    pub fn as_bytes(&self) -> &[u8] {
+        self.buffer.as_bytes()
     }
 }

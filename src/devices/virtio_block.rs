@@ -1,46 +1,43 @@
-use crate::{vm, disk};
-use crate::virtio::{VirtioBus, VirtioDeviceOps, VirtQueue, DeviceConfigArea, Chain};
-use std::sync::{RwLock, Arc};
-use crate::memory::MemoryManager;
-use std::{result, io, fmt, thread};
-use crate::devices::virtio_block::Error::IoChainError;
 use std::io::Write;
+use std::sync::{RwLock, Arc};
+use std::{result, io, fmt, thread};
+
+use crate::{disk, virtio};
+use crate::virtio::{VirtioBus, VirtioDeviceOps, VirtQueue, DeviceConfigArea, Chain};
+use crate::memory::MemoryManager;
 use crate::disk::DiskImage;
 
 const VIRTIO_BLK_F_RO: u64 = (1 << 5);
-//const VIRTIO_BLK_F_BLK_SIZE: u64 = (1 << 6);
+const VIRTIO_BLK_F_BLK_SIZE: u64 = (1 << 6);
 const VIRTIO_BLK_F_FLUSH: u64 = (1 << 9);
-//const VIRTIO_BLK_F_DISCARD: u64 = (1 << 13);
-//const VIRTIO_BLK_F_WRITE_ZEROES: u64 = (1 << 14);
+const VIRTIO_BLK_F_SEG_MAX: u64 = (1 << 2);
 
 const VIRTIO_BLK_T_IN: u32 = 0;
 const VIRTIO_BLK_T_OUT: u32 = 1;
 const VIRTIO_BLK_T_FLUSH: u32 = 4;
 const VIRTIO_BLK_T_GET_ID: u32 = 8;
-//const VIRTIO_BLK_T_DISCARD: u32 = 11;
-//const VIRTIO_BLK_T_WRITE_ZEROES: u32 = 13;
 
 const VIRTIO_BLK_S_OK: u8 = 0;
 const VIRTIO_BLK_S_IOERR: u8 = 1;
 const VIRTIO_BLK_S_UNSUPP: u8 = 2;
 
-const SECTOR_SIZE: usize = 512;
+const SECTOR_SHIFT: usize = 9;
+const SECTOR_SIZE: usize = 1 << SECTOR_SHIFT;
 
-// TODO:
-//   - feature bits
-//   - disk image write overlay
-//   - better error handling for i/o
+const QUEUE_SIZE: usize = 256;
+
 enum Error {
     IoChainError(io::Error),
     DiskRead(disk::Error),
     DiskWrite(disk::Error),
     DiskFlush(disk::Error),
-    VirtQueueWait(vm::Error),
+    VirtQueueWait(virtio::Error),
+    InvalidReadDescriptor(usize),
 }
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
-        IoChainError(e)
+        Error::IoChainError(e)
     }
 }
 
@@ -53,6 +50,7 @@ impl fmt::Display for Error {
             DiskWrite(e) => write!(f, "error writing disk image: {}", e),
             DiskFlush(e) => write!(f, "error flushing disk image: {}", e),
             VirtQueueWait(e) =>write!(f, "error waiting on virtqueue: {}", e),
+            InvalidReadDescriptor(sz) => write!(f, "virtqueue read descriptor size ({}) is invalid. Not a multiple of sector size", sz),
         }
     }
 }
@@ -64,11 +62,20 @@ pub struct VirtioBlock<D: DiskImage+'static> {
     enabled_features: u64,
 }
 
+const HEADER_SIZE: usize = 16;
+
 const VIRTIO_ID_BLOCK: u16 = 2;
+const CAPACITY_OFFSET: usize = 0;
+const SEG_MAX_OFFSET: usize = 12;
+const BLK_SIZE_OFFSET: usize = 20;
+const CONFIG_SIZE: usize = 24;
 impl <D: DiskImage + 'static> VirtioBlock<D> {
-    pub fn new(disk_image: D) -> Self {
-        let mut config = DeviceConfigArea::new(8);
-        config.write_u64(0, disk_image.sector_count());
+
+    fn new(disk_image: D) -> Self {
+        let mut config = DeviceConfigArea::new(CONFIG_SIZE);
+        config.write_u64(CAPACITY_OFFSET, disk_image.sector_count());
+        config.write_u32(SEG_MAX_OFFSET, QUEUE_SIZE as u32 - 2);
+        config.write_u32(BLK_SIZE_OFFSET, 1024);
         VirtioBlock {
             disk_image: Some(disk_image),
             config,
@@ -76,18 +83,21 @@ impl <D: DiskImage + 'static> VirtioBlock<D> {
         }
     }
 
-    pub fn create(vbus: &mut VirtioBus, disk_image: D) -> vm::Result<()> {
-        let feature_bits = if disk_image.read_only() {
-            VIRTIO_BLK_F_FLUSH|VIRTIO_BLK_F_RO
-        } else {
-            VIRTIO_BLK_F_FLUSH
-        };
+    pub fn create(vbus: &mut VirtioBus, disk_image: D) -> virtio::Result<()> {
+        let feature_bits = VIRTIO_BLK_F_FLUSH |
+            VIRTIO_BLK_F_BLK_SIZE |
+            VIRTIO_BLK_F_SEG_MAX  |
+            if disk_image.read_only() {
+                VIRTIO_BLK_F_RO
+            } else {
+                0
+            };
 
         let dev = Arc::new(RwLock::new(VirtioBlock::new(disk_image)));
 
         vbus.new_virtio_device(VIRTIO_ID_BLOCK, dev)
-            .set_queue_sizes(&[256])
-            .set_config_size(8)
+            .set_queue_sizes(&[QUEUE_SIZE])
+            .set_config_size(CONFIG_SIZE)
             .set_features(feature_bits)
             .register()
     }
@@ -109,20 +119,18 @@ impl <D: DiskImage> VirtioDeviceOps for VirtioBlock<D> {
 
     fn start(&mut self, _: &MemoryManager, mut queues: Vec<VirtQueue>) {
         let vq = queues.pop().unwrap();
-        let mut dev = match self.disk_image.take() {
-            Some(d) => VirtioBlockDevice::new(vq, d),
-            None => {
-                warn!("Unable to start virtio-block device. Already started?");
-                return;
-            }
-        };
 
+        let mut disk = self.disk_image.take().expect("No disk image?");
+        if let Err(err) = disk.open() {
+            warn!("Unable to start virtio-block device: {}", err);
+            return;
+        }
+        let mut dev = VirtioBlockDevice::new(vq, disk);
         thread::spawn(move || {
             if let Err(err) = dev.run() {
                 warn!("Error running virtio block device: {}", err);
             }
         });
-
     }
 }
 
@@ -138,29 +146,31 @@ impl <D: DiskImage> VirtioBlockDevice<D> {
 
     fn run(&mut self) -> Result<()> {
         loop {
-            let chain = self.vq.wait_next_chain()
+            let mut chain = self.vq.wait_next_chain()
                 .map_err(Error::VirtQueueWait)?;
 
-            match MessageHandler::read_header(&mut self.disk, chain) {
-                Ok(mut handler) => handler.process_message(),
-                Err(e) => {
-                    warn!("Error handling virtio_block message: {}", e);
+            while chain.remaining_read() >= HEADER_SIZE {
+                match MessageHandler::read_header(&mut self.disk, &mut chain) {
+                    Ok(mut handler) => handler.process_message(),
+                    Err(e) => {
+                        warn!("Error handling virtio_block message: {}", e);
+                    }
                 }
             }
         }
     }
 }
 
-struct MessageHandler<'a, D: DiskImage> {
+struct MessageHandler<'a,'b, D: DiskImage> {
     disk: &'a mut D,
-    chain: Chain,
+    chain: &'b mut Chain,
     msg_type: u32,
     sector: u64,
 }
 
-impl <'a, D: DiskImage> MessageHandler<'a, D> {
+impl <'a,'b, D: DiskImage> MessageHandler<'a,'b, D> {
 
-    fn read_header(disk: &'a mut D, mut chain: Chain) -> Result<Self> {
+    fn read_header(disk: &'a mut D, chain: &'b mut Chain) -> Result<Self> {
         let msg_type = chain.r32()?;
         let _ = chain.r32()?;
         let sector = chain.r64()?;
@@ -192,30 +202,39 @@ impl <'a, D: DiskImage> MessageHandler<'a, D> {
         }
     }
 
-    fn sector_round(sz: usize) -> usize {
-        (sz / SECTOR_SIZE) * SECTOR_SIZE
-    }
-
     fn handle_io_in(&mut self) -> Result<()> {
-        let current = self.chain.current_write_slice();
-        let len = Self::sector_round(current.len());
-        let buffer = &mut current[..len];
+        loop {
+            let current = self.chain.current_write_slice();
+            let nsectors = current.len() >> SECTOR_SHIFT;
+            if nsectors == 0 {
+                return Ok(())
+            }
+            let len = nsectors << SECTOR_SHIFT;
+            let buffer = &mut current[..len];
 
-        self.disk.read_sectors(self.sector, buffer)
-            .map_err(Error::DiskRead)?;
-        self.chain.inc_offset(len, true);
-        Ok(())
+            self.disk.read_sectors(self.sector, buffer)
+                .map_err(Error::DiskRead)?;
+            self.chain.inc_write_offset(len);
+            self.sector += nsectors as u64;
+        }
     }
 
     fn handle_io_out(&mut self) -> Result<()> {
-        let current = self.chain.current_read_slice();
-        let len = Self::sector_round(current.len());
-        let buffer = &current[..len];
+        loop {
+            let current = self.chain.current_read_slice();
+            if current.len() & (SECTOR_SIZE-1) != 0 {
+                return Err(Error::InvalidReadDescriptor(current.len()));
+            }
+            let nsectors = current.len() >> SECTOR_SHIFT;
+            if nsectors == 0 {
+                return Ok(())
+            }
+            self.disk.write_sectors(self.sector, current)
+                .map_err(Error::DiskWrite)?;
 
-        self.disk.write_sectors(self.sector, buffer)
-            .map_err(Error::DiskWrite)?;
-        self.chain.inc_offset(len, false);
-        Ok(())
+            self.chain.inc_read_offset(nsectors << SECTOR_SHIFT);
+            self.sector += nsectors as u64;
+        }
     }
 
     fn handle_io_flush(&mut self) -> Result<()> {

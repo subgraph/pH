@@ -1,17 +1,18 @@
-use crate::system::{MemoryFd, BitVec};
+use crate::system::MemoryFd;
+use crate::util::BitSet;
 use crate::disk::{Result, Error, SECTOR_SIZE, DiskImage};
 use std::io::SeekFrom;
 
 pub struct MemoryOverlay {
     memory: MemoryFd,
-    written_sectors: BitVec,
+    written_sectors: BitSet,
 }
 
 impl MemoryOverlay {
     pub fn new() -> Result<Self> {
         let memory = MemoryFd::new_memfd(0, false)
             .map_err(Error::MemoryOverlayCreate)?;
-        let written_sectors = BitVec::new();
+        let written_sectors = BitSet::new();
         Ok(MemoryOverlay { memory, written_sectors })
     }
 
@@ -30,14 +31,14 @@ impl MemoryOverlay {
 
         for n in 0..sector_count {
             let idx = start as usize + n;
-            self.written_sectors.set_bit(idx);
+            self.written_sectors.insert(idx);
         }
         Ok(())
     }
 
     pub fn read_sectors<D: DiskImage>(&mut self, disk: &mut D, start: u64, buffer: &mut [u8]) -> Result<()> {
         let sector_count = buffer.len() / SECTOR_SIZE;
-        if (0..sector_count).all(|i| !self.written_sectors.get_bit(i)) {
+        if (0..sector_count).all(|i| !self.written_sectors.get(i)) {
             return disk.read_sectors(start, buffer);
         }
 
@@ -45,7 +46,7 @@ impl MemoryOverlay {
             let sector = start + n as u64;
             let offset = n * SECTOR_SIZE;
             let sector_buffer = &mut buffer[offset..offset+SECTOR_SIZE];
-            if self.written_sectors.get_bit(sector as usize) {
+            if self.written_sectors.get(sector as usize) {
                 self.read_single_sector(sector, sector_buffer)?;
             } else {
                 disk.read_sectors(sector, sector_buffer)?;
